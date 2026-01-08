@@ -11,30 +11,38 @@ from datetime import datetime
 # ==========================================
 st.set_page_config(page_title="My AI Stock Dashboard", layout="wide", page_icon="🚀")
 
-# טעינת המפתח מהסודות
+# טעינת המפתח
 try:
     GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
 except:
-    st.error("⚠️ Missing API Key in Secrets! Please verify Streamlit settings.")
     GEMINI_KEY = None
 
+# הגדרת מודל חכמה (מנסה כמה אפשרויות)
+model = None
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-pro')
+    # ננסה קודם את המודל המהיר, אם לא קיים נלך על הקלאסי
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except:
+        model = genai.GenerativeModel('gemini-pro')
+
 CONFIG_FILE = "my_stock_config.xlsx"
 REPORT_FILE = "AI_Analysis_Report.xlsx"
 
 # ==========================================
-# 🧠 פונקציות (AI + שוק)
+# 🧠 פונקציות
 # ==========================================
 def analyze_with_ai(ticker, news_list):
-    if not GEMINI_KEY: return "Missing Key", 0
+    if not model: return "AI Not Connected", 0
     if not news_list: return "No News", 0
     
     headlines = [n.get('title', '') for n in news_list[:3]]
     text = ". ".join(headlines)
     
-    prompt = f"Analyze stock {ticker} headlines: '{text}'. Output: Summary (max 10 words) | Score (-1 to 1)."
+    # הנחיה ל-AI (קצרה וממוקדת)
+    prompt = f"Stock {ticker}: '{text}'. Summary (max 10 words) | Score (-1 to 1)."
+    
     try:
         response = model.generate_content(prompt)
         content = response.text.strip()
@@ -42,7 +50,8 @@ def analyze_with_ai(ticker, news_list):
             return content.split("|")[0], float(content.split("|")[1])
         return content, 0
     except Exception as e:
-        return f"Error: {str(e)[:10]}", 0
+        # במקרה של שגיאה, נחזיר הודעה נקייה יותר
+        return "Analysis Skipped", 0
 
 def get_sp500_return():
     try:
@@ -74,9 +83,7 @@ def run_full_analysis():
             stock = yf.Ticker(ticker)
             hist = stock.history(period="1y")
             
-            if hist.empty:
-                st.warning(f"⚠️ Failed to fetch data for {ticker} (skipped)")
-                continue
+            if hist.empty: continue
             
             price = hist['Close'].iloc[-1]
             ai_sum, ai_score = analyze_with_ai(ticker, stock.news)
@@ -111,7 +118,7 @@ def run_full_analysis():
     return new_df
 
 # ==========================================
-# 📊 תצוגת הדשבורד
+# 📊 תצוגה
 # ==========================================
 st.title("🚀 My AI Cloud Dashboard")
 st.caption(f"Last Update: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -127,7 +134,7 @@ if os.path.exists(REPORT_FILE):
     holdings = df[df['Type'] == 'Holdings']
     watchlist = df[df['Type'] == 'Watchlist']
     
-    # 1. השוואה לשוק (S&P 500)
+    # 1. השוואה לשוק
     my_return = holdings['P/L %'].mean()
     market_return = get_sp500_return()
     diff = my_return - market_return
@@ -157,7 +164,5 @@ if os.path.exists(REPORT_FILE):
         fig2 = px.scatter(watchlist, x='Symbol', y='Price', size='Price', color='Action',
                           hover_data=['AI Summary'], title="Market Opportunities")
         st.plotly_chart(fig2, use_container_width=True)
-
 else:
-    st.info("👋 Welcome! Click the button above to start your first analysis.")
-
+    st.info("👋 Click the button above to start!")
