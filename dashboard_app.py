@@ -20,8 +20,7 @@ except:
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash') # מודל יציב ומהיר
-
+    model = genai.GenerativeModel('gemini-pro')
 CONFIG_FILE = "my_stock_config.xlsx"
 REPORT_FILE = "AI_Analysis_Report.xlsx"
 
@@ -161,3 +160,4 @@ if os.path.exists(REPORT_FILE):
 
 else:
     st.info("👋 Welcome! Click the button above to start your first analysis.")
+
