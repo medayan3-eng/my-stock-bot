@@ -24,6 +24,14 @@ SOLD_HISTORY = [
     {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026"}
 ]
 
+# 📅 יומן דוחות (כאן מעדכנים תאריכים ידנית כדי שיהיה 100% מדוייק)
+EARNINGS_CALENDAR = {
+    "AMZN": "06/02/26",
+    "PLTR": "03/02/26",
+    "VRT":  "12/02/26",
+    "GEV":  "28/01/26"
+}
+
 FEE = 7.0 
 
 # ==========================================
@@ -63,7 +71,6 @@ def get_financial_data():
         buy_price = item['Buy_Price']
         
         try:
-            # גישה לאובייקט המניה הספציפי
             ticker_obj = tickers.tickers[sym]
             
             # 1. נתוני מחיר
@@ -96,20 +103,8 @@ def get_financial_data():
                 bid, ask, d_high, d_low = 0, 0, 0, 0
                 analyst_display = "Data Unavail."
 
-            # 3. תאריך דוחות אמיתי (Earnings)
-            try:
-                cal = ticker_obj.calendar
-                if cal is not None and not cal.empty:
-                    # מנסה למשוך את תאריך הדוח הקרוב ביותר
-                    next_earnings = cal.iloc[0, 0]
-                    if isinstance(next_earnings, (datetime, pd.Timestamp)):
-                        earnings_date = next_earnings.strftime("%d/%m/%y")
-                    else:
-                        earnings_date = "TBD"
-                else:
-                    earnings_date = "TBD"
-            except:
-                earnings_date = "-"
+            # 3. תאריך דוחות (מהיומן הידני שלנו)
+            earnings_date = EARNINGS_CALENDAR.get(sym, "-")
 
             # --- חישובים פיננסיים ---
             market_val = last_price * qty
