@@ -1,168 +1,185 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import os
 import yfinance as yf
 import google.generativeai as genai
 from datetime import datetime
 
 # ==========================================
-# ⚙️ הגדרות
+# 📝 כאן אתה מעדכן את הנתונים שלך! (במקום אקסל)
 # ==========================================
-st.set_page_config(page_title="My AI Stock Dashboard", layout="wide", page_icon="🚀")
+MY_PORTFOLIO = [
+    # --- מזומן (עו"ש) ---
+    {"Symbol": "USD", "Qty": 1500, "Buy_Price": 1, "Type": "Cash", "Date": "Today"},
+    {"Symbol": "ILS", "Qty": 5000, "Buy_Price": 1, "Type": "Cash", "Date": "Today"},
 
-# טעינת המפתח
+    # --- מניות שקנית (Holdings) ---
+    # הפורמט: סימול, כמות, מחיר קנייה ממוצע, סוג, תאריך קנייה
+    {"Symbol": "PLTR", "Qty": 2,  "Buy_Price": 183.36, "Type": "Holdings", "Date": "18.12.2025"},
+    {"Symbol": "AMZN", "Qty": 6,  "Buy_Price": 227.00, "Type": "Holdings", "Date": "22.12.2025"},
+    {"Symbol": "VRT",  "Qty": 8,  "Buy_Price": 163.00, "Type": "Holdings", "Date": "22.12.2025"},
+    {"Symbol": "GEV",  "Qty": 2,  "Buy_Price": 700.00, "Type": "Holdings", "Date": "10.12.2025"},
+    
+    # --- מניות למעקב בלבד (Watchlist) ---
+    # שים כמות 0 ומחיר 0
+    {"Symbol": "NVDA", "Qty": 0, "Buy_Price": 0, "Type": "Watchlist", "Date": "-"},
+    {"Symbol": "TSLA", "Qty": 0, "Buy_Price": 0, "Type": "Watchlist", "Date": "-"},
+    {"Symbol": "GOOGL","Qty": 0, "Buy_Price": 0, "Type": "Watchlist", "Date": "-"},
+]
+
+# ==========================================
+# ⚙️ הגדרות מערכת
+# ==========================================
+st.set_page_config(page_title="My Portfolio App", layout="wide", page_icon="📱")
+
+# הסתרת אלמנטים מיותרים
+st.markdown("""<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>""", unsafe_allow_html=True)
+
+# חיבור ל-AI
 try:
     GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
-except:
-    GEMINI_KEY = None
-
-# הגדרת מודל חכמה (מנסה כמה אפשרויות)
-model = None
-if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    # ננסה קודם את המודל המהיר, אם לא קיים נלך על הקלאסי
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
     except:
         model = genai.GenerativeModel('gemini-pro')
-
-CONFIG_FILE = "my_stock_config.xlsx"
-REPORT_FILE = "AI_Analysis_Report.xlsx"
+except:
+    model = None
 
 # ==========================================
-# 🧠 פונקציות
+# 🧠 המוח (פונקציות)
 # ==========================================
-def analyze_with_ai(ticker, news_list):
-    if not model: return "AI Not Connected", 0
-    if not news_list: return "No News", 0
-    
-    headlines = [n.get('title', '') for n in news_list[:3]]
-    text = ". ".join(headlines)
-    
-    # הנחיה ל-AI (קצרה וממוקדת)
-    prompt = f"Stock {ticker}: '{text}'. Summary (max 10 words) | Score (-1 to 1)."
-    
+def get_usd_ils_rate():
     try:
-        response = model.generate_content(prompt)
-        content = response.text.strip()
-        if "|" in content:
-            return content.split("|")[0], float(content.split("|")[1])
-        return content, 0
-    except Exception as e:
-        # במקרה של שגיאה, נחזיר הודעה נקייה יותר
-        return "Analysis Skipped", 0
-
-def get_sp500_return():
-    try:
-        spy = yf.Ticker("^GSPC")
-        hist = spy.history(period="1y")
-        start = hist['Close'].iloc[0]
-        end = hist['Close'].iloc[-1]
-        return ((end - start) / start) * 100
+        return yf.Ticker("ILS=X").history(period="1d")['Close'].iloc[-1]
     except:
-        return 0.0
+        return 3.65
 
-def run_full_analysis():
-    if not os.path.exists(CONFIG_FILE):
-        st.error(f"❌ '{CONFIG_FILE}' not found on GitHub!")
-        return None
-
-    df_config = pd.read_excel(CONFIG_FILE)
-    report_data = []
+def analyze_stock(ticker, type_):
+    # חיסכון: לא מנתח מזומן או מניות מעקב רחוקות
+    if type_ == "Cash": return "Liquid", 0
+    if not model: return "No AI", 0
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    total = len(df_config)
-    
-    for i, row in df_config.iterrows():
-        ticker = row['Symbol']
-        status_text.text(f"🤖 AI Analyzing: {ticker}...")
+    try:
+        news = yf.Ticker(ticker).news[:2]
+        if not news: return "No News", 0
         
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1y")
-            
-            if hist.empty: continue
-            
-            price = hist['Close'].iloc[-1]
-            ai_sum, ai_score = analyze_with_ai(ticker, stock.news)
-            
-            # לוגיקה
-            pl_percent = 0
-            action = "WATCH"
-            if row['Type'] == 'Holdings':
-                buy_price = row['Buy_Price']
-                pl_percent = ((price - buy_price) / buy_price) * 100
-                if pl_percent > 15: action = "💰 TAKE PROFIT"
-                elif pl_percent < -5 and ai_score > 0: action = "♻️ BUY DIP"
-                else: action = "HOLD"
-            else:
-                if ai_score > 0.5: action = "🚀 OPPORTUNITY"
-            
-            report_data.append({
-                "Symbol": ticker, "Type": row['Type'], "Price": price,
-                "P/L %": pl_percent, "AI Summary": ai_sum, "Action": action
+        txt = ". ".join([n['title'] for n in news])
+        prompt = f"Stock {ticker}: '{txt}'. 3-word summary | Score -1 to 1."
+        res = model.generate_content(prompt).text.strip()
+        
+        if "|" in res:
+            return res.split("|")[0], float(res.split("|")[1])
+        return res, 0
+    except:
+        return "Info N/A", 0
+
+def load_data():
+    # המרת הרשימה הידנית לטבלה של פייתון
+    df = pd.DataFrame(MY_PORTFOLIO)
+    rate = get_usd_ils_rate()
+    today = datetime.now().strftime("%d/%m/%Y")
+    
+    final_data = []
+    
+    for _, row in df.iterrows():
+        symbol = row['Symbol']
+        qty = row['Qty']
+        b_price = row['Buy_Price']
+        p_type = row['Type']
+        
+        # --- טיפול במזומן ---
+        if p_type == "Cash":
+            val_usd = qty if symbol == "USD" else qty / rate
+            val_ils = qty * rate if symbol == "USD" else qty
+            final_data.append({
+                "Symbol": f"💵 {symbol}",
+                "Qty": qty,
+                "Price": 1,
+                "Value ($)": val_usd,
+                "Value (₪)": val_ils,
+                "Change %": 0,
+                "AI": "Liquid",
+                "Action": "-",
+                "Type": "Cash",
+                "Date": today
             })
+            continue
+
+        # --- טיפול במניות ---
+        try:
+            current_price = yf.Ticker(symbol).history(period="1d")['Close'].iloc[-1]
+            ai_txt, ai_score = analyze_stock(symbol, p_type)
             
-        except Exception as e:
-            print(f"Error {ticker}: {e}")
-        
-        progress_bar.progress((i + 1) / total)
+            pl_pct = ((current_price - b_price) / b_price * 100) if b_price > 0 else 0
+            
+            # לוגיקת המלצות
+            action = "HOLD"
+            if pl_pct > 20: action = "💰 SELL"
+            elif pl_pct < -5 and ai_score > 0.2: action = "♻️ BUY"
+            if p_type == "Watchlist" and ai_score > 0.5: action = "🚀 ENTRY"
 
-    status_text.text("✅ Analysis Complete!")
-    progress_bar.empty()
-    
-    new_df = pd.DataFrame(report_data)
-    new_df.to_excel(REPORT_FILE, index=False)
-    return new_df
+            final_data.append({
+                "Symbol": symbol,
+                "Qty": qty,
+                "Price": current_price,
+                "Value ($)": current_price * qty,
+                "Value (₪)": (current_price * qty) * rate,
+                "Change %": pl_pct,
+                "AI": ai_txt,
+                "Action": action,
+                "Type": p_type,
+                "Date": row['Date']
+            })
+        except:
+            pass # אם יש שגיאה במניה ספציפית, מדלג עליה
+            
+    return pd.DataFrame(final_data), rate
 
 # ==========================================
-# 📊 תצוגה
+# 📱 התצוגה בטלפון
 # ==========================================
-st.title("🚀 My AI Cloud Dashboard")
-st.caption(f"Last Update: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+st.title("My Capital Control")
 
-if st.button("🔄 Run AI Analysis Now"):
-    with st.spinner("Connecting to Google Brain..."):
-        df = run_full_analysis()
-        st.success("Data Updated!")
+if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
+    with st.spinner("Updating prices & AI..."):
+        d, r = load_data()
+        st.session_state['df'], st.session_state['rate'] = d, r
         st.rerun()
 
-if os.path.exists(REPORT_FILE):
-    df = pd.read_excel(REPORT_FILE)
-    holdings = df[df['Type'] == 'Holdings']
-    watchlist = df[df['Type'] == 'Watchlist']
+if 'df' in st.session_state:
+    df = st.session_state['df']
+    rate = st.session_state['rate']
     
-    # 1. השוואה לשוק
-    my_return = holdings['P/L %'].mean()
-    market_return = get_sp500_return()
-    diff = my_return - market_return
+    # חישוב שווי כולל
+    total_usd = df['Value ($)'].sum()
+    total_ils = total_usd * rate
     
-    c1, c2, c3 = st.columns(3)
-    c1.metric("My Portfolio", f"{my_return:.2f}%")
-    c2.metric("S&P 500 (1Y)", f"{market_return:.2f}%")
-    c3.metric("Beating Market?", f"{diff:.2f}%", "YES 🏆" if diff>0 else "NO 📉", delta_color="normal")
+    # כרטיסים למעלה
+    c1, c2 = st.columns(2)
+    c1.metric("Total (₪)", f"₪{total_ils:,.0f}", f"1$ = {rate:.2f}₪")
+    c2.metric("Total ($)", f"${total_usd:,.0f}")
     
     st.markdown("---")
     
-    # 2. גרפים
-    col_g1, col_g2 = st.columns([2, 1])
-    with col_g1:
-        st.subheader("💼 Holdings P/L")
-        fig = px.bar(holdings, x='Symbol', y='P/L %', color='P/L %', 
-                     color_continuous_scale=['red', 'yellow', 'green'], text_auto='.1f')
-        st.plotly_chart(fig, use_container_width=True)
+    # טבלת נתונים (ה"אקסל" באתר)
+    st.subheader("📊 Live Assets")
     
-    with col_g2:
-        st.subheader("🧠 AI Insights")
-        st.dataframe(holdings[['Symbol', 'AI Summary', 'Action']], hide_index=True, use_container_width=True)
+    # עיצוב צבעים לרווח/הפסד
+    def color_change(val):
+        color = 'green' if val > 0 else 'red' if val < 0 else 'white'
+        return f'color: {color}'
 
-    # 3. רשימת מעקב
-    st.subheader("🔭 Watchlist Radar")
-    if not watchlist.empty:
-        fig2 = px.scatter(watchlist, x='Symbol', y='Price', size='Price', color='Action',
-                          hover_data=['AI Summary'], title="Market Opportunities")
-        st.plotly_chart(fig2, use_container_width=True)
+    # הצגת הטבלה
+    view_df = df[['Symbol', 'Date', 'Qty', 'Price', 'Value ($)', 'Change %', 'AI', 'Action']]
+    st.dataframe(
+        view_df.style.format({
+            "Price": "${:.2f}",
+            "Value ($)": "${:,.0f}",
+            "Change %": "{:.2f}%"
+        }).applymap(color_change, subset=['Change %']),
+        use_container_width=True,
+        height=500
+    )
+    
 else:
-    st.info("👋 Click the button above to start!")
+    st.info("👆 Click REFRESH to load portfolio")
