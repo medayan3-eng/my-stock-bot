@@ -1,185 +1,302 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import google.generativeai as genai
 from datetime import datetime
+import time
 
 # ==========================================
-# 📝 כאן אתה מעדכן את הנתונים שלך! (במקום אקסל)
+# 💾 מאגר הנתונים המרכזי (Data Store)
 # ==========================================
-MY_PORTFOLIO = [
-    # --- מזומן (עו"ש) ---
-    {"Symbol": "USD", "Qty": 1500, "Buy_Price": 1, "Type": "Cash", "Date": "Today"},
-    {"Symbol": "ILS", "Qty": 5000, "Buy_Price": 1, "Type": "Cash", "Date": "Today"},
+# כאן אתה מזין את הנתונים שלך ידנית. המערכת תחשב לבד את כל השאר.
 
-    # --- מניות שקנית (Holdings) ---
-    # הפורמט: סימול, כמות, מחיר קנייה ממוצע, סוג, תאריך קנייה
-    {"Symbol": "PLTR", "Qty": 2,  "Buy_Price": 183.36, "Type": "Holdings", "Date": "18.12.2025"},
-    {"Symbol": "AMZN", "Qty": 6,  "Buy_Price": 227.00, "Type": "Holdings", "Date": "22.12.2025"},
-    {"Symbol": "VRT",  "Qty": 8,  "Buy_Price": 163.00, "Type": "Holdings", "Date": "22.12.2025"},
-    {"Symbol": "GEV",  "Qty": 2,  "Buy_Price": 700.00, "Type": "Holdings", "Date": "10.12.2025"},
-    
-    # --- מניות למעקב בלבד (Watchlist) ---
-    # שים כמות 0 ומחיר 0
-    {"Symbol": "NVDA", "Qty": 0, "Buy_Price": 0, "Type": "Watchlist", "Date": "-"},
-    {"Symbol": "TSLA", "Qty": 0, "Buy_Price": 0, "Type": "Watchlist", "Date": "-"},
-    {"Symbol": "GOOGL","Qty": 0, "Buy_Price": 0, "Type": "Watchlist", "Date": "-"},
+# 1. יתרות מזומן עדכניות (כפי שביקשת)
+CASH_BALANCE = {
+    "USD": 1484.98,
+    "ILS": 3222.39
+}
+
+# 2. המניות שאתה מחזיק כרגע (Holdings)
+CURRENT_PORTFOLIO = [
+    {"Symbol": "PLTR", "Qty": 2, "Buy_Price": 183.36, "Date": "18.12.2025"},
+    {"Symbol": "AMZN", "Qty": 6, "Buy_Price": 227.00, "Date": "22.12.2025"},
+    {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025"},
+    {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025"},
 ]
 
-# ==========================================
-# ⚙️ הגדרות מערכת
-# ==========================================
-st.set_page_config(page_title="My Portfolio App", layout="wide", page_icon="📱")
+# 3. היסטוריית מכירות (Sold) - לחישוב רווח ממומש
+# הערה: הזנתי את נתוני הקנייה המקוריים לפי התמונות הקודמות שלך כדי לחשב רווח אמיתי
+SOLD_HISTORY = [
+    {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026"},
+    {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026"}
+]
 
-# הסתרת אלמנטים מיותרים
-st.markdown("""<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>""", unsafe_allow_html=True)
-
-# חיבור ל-AI
-try:
-    GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=GEMINI_KEY)
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except:
-        model = genai.GenerativeModel('gemini-pro')
-except:
-    model = None
+# עמלה קבועה לכל פעולה (קנייה או מכירה)
+COMMISSION_FEE = 7.0 
 
 # ==========================================
-# 🧠 המוח (פונקציות)
+# ⚙️ הגדרות מערכת ותצוגה
 # ==========================================
-def get_usd_ils_rate():
-    try:
-        return yf.Ticker("ILS=X").history(period="1d")['Close'].iloc[-1]
-    except:
-        return 3.65
+st.set_page_config(page_title="Pro Trader Dashboard", layout="wide", page_icon="📈")
+st.markdown("""
+<style>
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
+    .big-font {font-size:24px !important; font-weight: bold;}
+    .metric-card {background-color: #f0f2f6; padding: 15px; border-radius: 10px; border: 1px solid #e0e0e0;}
+</style>
+""", unsafe_allow_html=True)
 
-def analyze_stock(ticker, type_):
-    # חיסכון: לא מנתח מזומן או מניות מעקב רחוקות
-    if type_ == "Cash": return "Liquid", 0
-    if not model: return "No AI", 0
+# ==========================================
+# 🧠 מנוע חישוב ואיסוף נתונים
+# ==========================================
+def get_live_data():
+    """מושך נתונים בזמן אמת לכל המניות בתיק + שער דולר"""
     
+    # 1. משיכת שער דולר-שקל
     try:
-        news = yf.Ticker(ticker).news[:2]
-        if not news: return "No News", 0
-        
-        txt = ". ".join([n['title'] for n in news])
-        prompt = f"Stock {ticker}: '{txt}'. 3-word summary | Score -1 to 1."
-        res = model.generate_content(prompt).text.strip()
-        
-        if "|" in res:
-            return res.split("|")[0], float(res.split("|")[1])
-        return res, 0
+        usd_ils = yf.Ticker("ILS=X").history(period="1d")['Close'].iloc[-1]
     except:
-        return "Info N/A", 0
-
-def load_data():
-    # המרת הרשימה הידנית לטבלה של פייתון
-    df = pd.DataFrame(MY_PORTFOLIO)
-    rate = get_usd_ils_rate()
-    today = datetime.now().strftime("%d/%m/%Y")
-    
-    final_data = []
-    
-    for _, row in df.iterrows():
-        symbol = row['Symbol']
-        qty = row['Qty']
-        b_price = row['Buy_Price']
-        p_type = row['Type']
+        usd_ils = 3.65 # גיבוי
         
-        # --- טיפול במזומן ---
-        if p_type == "Cash":
-            val_usd = qty if symbol == "USD" else qty / rate
-            val_ils = qty * rate if symbol == "USD" else qty
-            final_data.append({
-                "Symbol": f"💵 {symbol}",
-                "Qty": qty,
-                "Price": 1,
-                "Value ($)": val_usd,
-                "Value (₪)": val_ils,
-                "Change %": 0,
-                "AI": "Liquid",
-                "Action": "-",
-                "Type": "Cash",
-                "Date": today
-            })
-            continue
+    # 2. הכנת רשימת מניות למשיכה
+    symbols = [item['Symbol'] for item in CURRENT_PORTFOLIO]
+    if not symbols:
+        return pd.DataFrame(), usd_ils
 
-        # --- טיפול במניות ---
+    # 3. משיכת נתונים מרוכזת (Batch Fetch)
+    tickers = yf.Tickers(" ".join(symbols))
+    
+    live_data = []
+    total_market_value = 0
+    total_unrealized_pl = 0
+    
+    for item in CURRENT_PORTFOLIO:
+        sym = item['Symbol']
+        qty = item['Qty']
+        buy_price = item['Buy_Price']
+        
         try:
-            current_price = yf.Ticker(symbol).history(period="1d")['Close'].iloc[-1]
-            ai_txt, ai_score = analyze_stock(symbol, p_type)
+            # שליפת מידע מ-Yahoo
+            info = tickers.tickers[sym].info
+            fast_info = tickers.tickers[sym].fast_info
             
-            pl_pct = ((current_price - b_price) / b_price * 100) if b_price > 0 else 0
+            # נתונים בזמן אמת
+            last_price = fast_info.last_price
+            prev_close = fast_info.previous_close
             
-            # לוגיקת המלצות
-            action = "HOLD"
-            if pl_pct > 20: action = "💰 SELL"
-            elif pl_pct < -5 and ai_score > 0.2: action = "♻️ BUY"
-            if p_type == "Watchlist" and ai_score > 0.5: action = "🚀 ENTRY"
+            # ניסיון להשיג נתונים עמוקים (Bid/Ask/Range)
+            bid = info.get('bid', 0)
+            ask = info.get('ask', 0)
+            day_high = info.get('dayHigh', 0)
+            day_low = info.get('dayLow', 0)
+            
+            # תאריך דוחות (Earnings)
+            try:
+                # מנסה למצוא את התאריך הבא
+                calendar = tickers.tickers[sym].calendar
+                if calendar is not None and not calendar.empty:
+                    # בדיקה איפה התאריך נמצא (משתנה בין גרסאות)
+                    earnings_date = calendar.iloc[0, 0] if isinstance(calendar.iloc[0, 0], (datetime, pd.Timestamp)) else "TBD"
+                    if isinstance(earnings_date, (datetime, pd.Timestamp)):
+                        earnings_date = earnings_date.strftime("%d/%m/%y")
+                else:
+                    earnings_date = "-"
+            except:
+                earnings_date = "-"
 
-            final_data.append({
-                "Symbol": symbol,
+            # --- חישובים ---
+            market_val = last_price * qty
+            cost_basis = buy_price * qty
+            
+            # שינוי יומי ($)
+            day_change_dollar = last_price - prev_close
+            
+            # רווח/הפסד יומי ($)
+            day_pl = day_change_dollar * qty
+            
+            # רווח/הפסד כולל ($)
+            total_pl = market_val - cost_basis
+            total_pl_pct = (total_pl / cost_basis) * 100
+            
+            total_market_value += market_val
+            total_unrealized_pl += total_pl
+
+            # עיצוב HTML לרווח והפסד (צבעים בתוך הטבלה)
+            color = "green" if total_pl >= 0 else "red"
+            sign = "+" if total_pl >= 0 else ""
+            pl_display = f'<span style="color:{color}; font-weight:bold;">{sign}{total_pl:,.2f}$<br><span style="font-size:0.8em;">({sign}{total_pl_pct:.2f}%)</span></span>'
+            
+            day_pl_color = "green" if day_pl >= 0 else "red"
+            day_pl_display = f'<span style="color:{day_pl_color}">{day_pl:,.2f}$</span>'
+
+            live_data.append({
+                "Symbol": sym,
                 "Qty": qty,
-                "Price": current_price,
-                "Value ($)": current_price * qty,
-                "Value (₪)": (current_price * qty) * rate,
-                "Change %": pl_pct,
-                "AI": ai_txt,
-                "Action": action,
-                "Type": p_type,
-                "Date": row['Date']
+                "Last Price": f"${last_price:.2f}",
+                "Change ($)": f"{day_change_dollar:+.2f}",
+                "Bid / Ask": f"{bid:.2f} / {ask:.2f}",
+                "Day Range": f"{day_low:.2f}-{day_high:.2f}",
+                "Cost": f"${buy_price:.2f}",
+                "Market Value": f"${market_val:,.2f}",
+                "Daily P/L": day_pl_display,
+                "Total P/L": pl_display, # עמודה מיוחדת עם HTML
+                "Reports": earnings_date,
+                # נתונים גולמיים למיון אם נצטרך
+                "_raw_pl": total_pl
             })
-        except:
-            pass # אם יש שגיאה במניה ספציפית, מדלג עליה
             
-    return pd.DataFrame(final_data), rate
+        except Exception as e:
+            # במקרה של תקלה במניה ספציפית
+            live_data.append({"Symbol": sym, "Qty": qty, "Last Price": "Error"})
+            print(f"Error {sym}: {e}")
+
+    return pd.DataFrame(live_data), usd_ils, total_market_value, total_unrealized_pl
 
 # ==========================================
-# 📱 התצוגה בטלפון
+# 📱 ממשק האפליקציה (UI)
 # ==========================================
-st.title("My Capital Control")
 
-if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
-    with st.spinner("Updating prices & AI..."):
-        d, r = load_data()
-        st.session_state['df'], st.session_state['rate'] = d, r
-        st.rerun()
+st.title("🏛️ My Investment Command Center")
 
-if 'df' in st.session_state:
-    df = st.session_state['df']
-    rate = st.session_state['rate']
-    
-    # חישוב שווי כולל
-    total_usd = df['Value ($)'].sum()
-    total_ils = total_usd * rate
-    
-    # כרטיסים למעלה
-    c1, c2 = st.columns(2)
-    c1.metric("Total (₪)", f"₪{total_ils:,.0f}", f"1$ = {rate:.2f}₪")
-    c2.metric("Total ($)", f"${total_usd:,.0f}")
-    
-    st.markdown("---")
-    
-    # טבלת נתונים (ה"אקסל" באתר)
-    st.subheader("📊 Live Assets")
-    
-    # עיצוב צבעים לרווח/הפסד
-    def color_change(val):
-        color = 'green' if val > 0 else 'red' if val < 0 else 'white'
-        return f'color: {color}'
+# כפתור רענון
+if st.button("🔄 REFRESH MARKET DATA", type="primary", use_container_width=True):
+    st.rerun()
 
-    # הצגת הטבלה
-    view_df = df[['Symbol', 'Date', 'Qty', 'Price', 'Value ($)', 'Change %', 'AI', 'Action']]
-    st.dataframe(
-        view_df.style.format({
-            "Price": "${:.2f}",
-            "Value ($)": "${:,.0f}",
-            "Change %": "{:.2f}%"
-        }).applymap(color_change, subset=['Change %']),
-        use_container_width=True,
-        height=500
-    )
+# --- טעינת נתונים ---
+with st.spinner("Connecting to Wall St..."):
+    df_live, rate, portfolio_val, total_pl_val = get_live_data()
+
+# --- חישובי תיק כוללים ---
+usd_cash = CASH_BALANCE["USD"]
+ils_cash = CASH_BALANCE["ILS"]
+ils_cash_in_usd = ils_cash / rate
+
+# שווי חשבון כולל (מניות + מזומן דולרי + מזומן שקלי מומר)
+total_net_worth_usd = portfolio_val + usd_cash + ils_cash_in_usd
+total_net_worth_ils = total_net_worth_usd * rate
+
+# כוח קנייה (מזומן דולרי + המרה של השקלים לדולר)
+buying_power = usd_cash + ils_cash_in_usd
+
+# --- כרטיסי מידע (Metrics) ---
+st.markdown("### 🏦 Account Overview")
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric("Total Net Worth ($)", f"${total_net_worth_usd:,.2f}")
+with col2:
+    st.metric("Total Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f} ₪/$")
+with col3:
+    st.metric("Portfolio Value (Stocks)", f"${portfolio_val:,.2f}")
+with col4:
+    st.metric("Buying Power", f"${buying_power:,.2f}", "Liquid Cash")
+
+st.markdown("---")
+
+# כרטיס רווח/הפסד מיוחד
+pl_color = "normal" if total_pl_val == 0 else "inverse" # טריק לצבע
+st.metric("Total Unrealized P/L (Open Positions)", f"${total_pl_val:,.2f}", delta_color=pl_color)
+
+st.markdown("---")
+
+# --- לשוניות (Tabs) ---
+tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🛒 Buy History", "💰 Sell History"])
+
+# 1️⃣ לשונית תיק חי (Live Assets)
+with tab1:
+    st.subheader("Current Holdings")
+    if not df_live.empty:
+        # שימוש ב-HTML כדי להציג את הצבעים בטבלה
+        st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
+    else:
+        st.info("No holdings currently.")
+
+# 2️⃣ לשונית היסטוריית קניות (Buy History)
+with tab2:
+    st.subheader("🧾 Purchase Log")
+    buy_data = []
+    total_buy_commissions = 0
     
-else:
-    st.info("👆 Click REFRESH to load portfolio")
+    # חישוב היסטוריית קניות של התיק הנוכחי
+    for item in CURRENT_PORTFOLIO:
+        val = item['Qty'] * item['Buy_Price']
+        commission = COMMISSION_FEE
+        total_buy_commissions += commission
+        buy_data.append({
+            "Symbol": item['Symbol'],
+            "Date": item['Date'],
+            "Qty": item['Qty'],
+            "Price": f"${item['Buy_Price']:.2f}",
+            "Total Cost": f"${val:,.2f}",
+            "Commission": f"${commission:.2f}"
+        })
+    
+    # הוספת קניות של מניות שנמכרו (כדי שההיסטוריה תהיה מלאה)
+    for item in SOLD_HISTORY:
+        val = item['Qty'] * item['Buy_Price']
+        commission = COMMISSION_FEE
+        total_buy_commissions += commission
+        buy_data.append({
+            "Symbol": item['Symbol'] + " (Sold)",
+            "Date": "History", # או להוסיף תאריך אם ידוע
+            "Qty": item['Qty'],
+            "Price": f"${item['Buy_Price']:.2f}",
+            "Total Cost": f"${val:,.2f}",
+            "Commission": f"${commission:.2f}"
+        })
+
+    df_buy = pd.DataFrame(buy_data)
+    st.table(df_buy)
+    st.caption(f"Total Buy Commissions Paid: ${total_buy_commissions:.2f}")
+
+# 3️⃣ לשונית היסטוריית מכירות (Sell History)
+with tab3:
+    st.subheader("💸 Realized Gains/Losses")
+    sell_data = []
+    total_realized_pl = 0
+    total_sell_commissions = 0
+    
+    for item in SOLD_HISTORY:
+        qty = item['Qty']
+        sell_price = item['Sell_Price']
+        buy_price = item['Buy_Price']
+        
+        # חישובים
+        sale_proceeds = qty * sell_price
+        cost_basis = qty * buy_price
+        commission = COMMISSION_FEE
+        
+        # רווח נקי = (מכירה - קנייה) פחות עמלת מכירה
+        # הערה: יש גם עמלת קנייה, מחמירים יכולים להוריד גם אותה (כאן הורדנו רק עמלת פעולה נוכחית)
+        realized_pl = (sale_proceeds - cost_basis) - commission
+        
+        total_realized_pl += realized_pl
+        total_sell_commissions += commission
+        
+        # צבע לרווח/הפסד
+        color = "green" if realized_pl > 0 else "red"
+        
+        sell_data.append({
+            "Symbol": item['Symbol'],
+            "Date Sold": item['Date'],
+            "Qty": qty,
+            "Sell Price": f"${sell_price:.2f}",
+            "Buy Price": f"${buy_price:.2f}",
+            "Proceeds": f"${sale_proceeds:,.2f}",
+            "Commission": f"${commission:.2f}",
+            "Realized P/L": f'<span style="color:{color}; font-weight:bold;">${realized_pl:,.2f}</span>'
+        })
+        
+    if sell_data:
+        df_sell = pd.DataFrame(sell_data)
+        st.write(df_sell.to_html(escape=False, index=False), unsafe_allow_html=True)
+        
+        st.markdown("---")
+        col_s1, col_s2 = st.columns(2)
+        col_s1.metric("Total Realized Profit", f"${total_realized_pl:,.2f}")
+        col_s2.metric("Total Sell Commissions", f"${total_sell_commissions:.2f}")
+    else:
+        st.info("No sales executed yet.")
+
+# --- תחתית הדף ---
+st.markdown("---")
+st.caption(f"System updated: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | Data provided by Yahoo Finance | Fees: $7 flat rate")
