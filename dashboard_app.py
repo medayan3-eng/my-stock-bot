@@ -7,24 +7,33 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
+# 1. יתרות מזומן מעודכנות
+# (חושב מחדש: יתרה קודמת פחות הפסדי מסחר ועמלות של אתמול + הפקדה לשקלים)
 CASH_BALANCE = {
-    "USD": 1484.98,
-    "ILS": 3222.39
+    "USD": 1348.40, 
+    "ILS": 4822.39  
 }
 
+# 2. תיק נוכחי (החזקות פתוחות)
+# הוספתי את עמלת הקנייה ההיסטורית (7.5$) לכל מניה כדי שהחישוב יהיה מדויק
 CURRENT_PORTFOLIO = [
-    {"Symbol": "PLTR", "Qty": 2, "Buy_Price": 183.36, "Date": "18.12.2025"},
-    {"Symbol": "AMZN", "Qty": 6, "Buy_Price": 227.00, "Date": "22.12.2025"},
-    {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025"},
-    {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025"},
+    {"Symbol": "PLTR", "Qty": 2, "Buy_Price": 183.36, "Date": "18.12.2025", "Fee": 7.5},
+    {"Symbol": "AMZN", "Qty": 6, "Buy_Price": 227.00, "Date": "22.12.2025", "Fee": 7.5},
+    {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5},
+    {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025", "Fee": 7.5},
 ]
 
+# 3. היסטוריית מכירות (סגורות)
+# כאן אנחנו מתעדים את העמלה שהייתה בפועל באותו זמן (7.5 לכל צד = 15 טוטאל)
 SOLD_HISTORY = [
-    {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026"},
-    {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026"}
+    {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026", "Fee_Total": 15.0},
+    {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026", "Fee_Total": 15.0},
+    # העסקאות של אתמול (הפסדים)
+    {"Symbol": "OSS",  "Qty": 165, "Sell_Price": 11.95, "Buy_Price": 11.99, "Date": "13.01.2026", "Fee_Total": 15.0},
+    {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 15.0},
 ]
 
-# 📅 יומן דוחות (כאן מעדכנים תאריכים ידנית כדי שיהיה 100% מדוייק)
+# 📅 יומן דוחות
 EARNINGS_CALENDAR = {
     "AMZN": "06/02/26",
     "PLTR": "03/02/26",
@@ -32,7 +41,8 @@ EARNINGS_CALENDAR = {
     "GEV":  "28/01/26"
 }
 
-FEE = 7.0 
+# עמלה חדשה מעכשיו והלאה (לסימולציות ולעסקאות עתידיות שתוסיף בלי לציין עמלה)
+CURRENT_FEE = 7.0 
 
 # ==========================================
 # ⚙️ הגדרות תצוגה
@@ -47,7 +57,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🧠 מנוע חישובים פיננסיים + אנליסטים
+# 🧠 מנוע חישובים פיננסיים
 # ==========================================
 def get_financial_data():
     try:
@@ -63,7 +73,9 @@ def get_financial_data():
     live_rows = []
     portfolio_market_value = 0 
     total_unrealized_pl = 0
-    fees_paid_on_holdings = len(CURRENT_PORTFOLIO) * FEE
+    
+    # חישוב עמלות ששולמו על התיק הפתוח (לפי מה שרשום לכל מניה)
+    fees_paid_on_open_holdings = sum([item.get('Fee', CURRENT_FEE) for item in CURRENT_PORTFOLIO])
 
     for item in CURRENT_PORTFOLIO:
         sym = item['Symbol']
@@ -72,41 +84,34 @@ def get_financial_data():
         
         try:
             ticker_obj = tickers.tickers[sym]
-            
-            # 1. נתוני מחיר
             fast_info = ticker_obj.fast_info
             last_price = fast_info.last_price
             prev_close = fast_info.previous_close
             
-            # 2. נתוני מידע מורחב (אנליסטים + טווח יומי)
+            # מידע מורחב
             try:
                 info = ticker_obj.info
                 bid = info.get('bid', 0)
                 ask = info.get('ask', 0)
                 d_high = info.get('dayHigh', 0)
                 d_low = info.get('dayLow', 0)
-                
-                # --- לוגיקת אנליסטים ---
                 target_price = info.get('targetMeanPrice', None)
                 recommendation = info.get('recommendationKey', 'N/A').replace('_', ' ').upper()
                 
                 analyst_display = "N/A"
                 if target_price:
                     upside_pct = ((target_price - last_price) / last_price) * 100
-                    a_color = "#2ecc71" if upside_pct > 0 else "#e74c3c" # ירוק/אדום
+                    a_color = "#2ecc71" if upside_pct > 0 else "#e74c3c"
                     arrow = "▲" if upside_pct > 0 else "▼"
-                    if -1 < upside_pct < 1: a_color = "gray" # ניטרלי
-                    
+                    if -1 < upside_pct < 1: a_color = "gray"
                     analyst_display = f'<span style="color:{a_color}; font-weight:bold;">{recommendation}<br><small>{arrow} {upside_pct:.1f}% (Target: ${target_price})</small></span>'
-                
             except:
                 bid, ask, d_high, d_low = 0, 0, 0, 0
                 analyst_display = "Data Unavail."
 
-            # 3. תאריך דוחות (מהיומן הידני שלנו)
             earnings_date = EARNINGS_CALENDAR.get(sym, "-")
 
-            # --- חישובים פיננסיים ---
+            # חישובים
             market_val = last_price * qty
             cost_basis = buy_price * qty
             
@@ -119,7 +124,6 @@ def get_financial_data():
             portfolio_market_value += market_val
             total_unrealized_pl += total_pl
 
-            # עיצוב HTML
             def color_val(val, suffix=""):
                 c = "#2ecc71" if val >= 0 else "#e74c3c"
                 return f'<span style="color:{c}; font-weight:bold;">{val:,.2f}{suffix}</span>'
@@ -144,18 +148,20 @@ def get_financial_data():
 
     # --- חישוב היסטורי (מכירות) ---
     total_realized_pl_net = 0
-    fees_paid_on_sold = 0
+    fees_paid_on_sold_total = 0
     
     for s in SOLD_HISTORY:
         gross_profit = (s['Sell_Price'] - s['Buy_Price']) * s['Qty']
-        trade_fees = FEE * 2 
+        # שימוש בעמלה הספציפית לעסקה אם קיימת, אחרת ברירת מחדל כפולה
+        trade_fees = s.get('Fee_Total', CURRENT_FEE * 2)
+        
         net_profit = gross_profit - trade_fees
         total_realized_pl_net += net_profit
-        fees_paid_on_sold += trade_fees
+        fees_paid_on_sold_total += trade_fees
 
-    total_fees_lifetime = fees_paid_on_holdings + fees_paid_on_sold
+    total_fees_lifetime = fees_paid_on_open_holdings + fees_paid_on_sold_total
     
-    return pd.DataFrame(live_rows), usd_ils, portfolio_market_value, total_unrealized_pl, total_realized_pl_net, total_fees_lifetime
+    return pd.DataFrame(live_rows), usd_ils, portfolio_market_value, total_unrealized_pl, total_realized_pl_net, total_fees_lifetime, fees_paid_on_open_holdings
 
 # ==========================================
 # 📱 ממשק משתמש
@@ -166,7 +172,7 @@ if st.button("🔄 REFRESH LIVE DATA", type="primary", use_container_width=True)
     st.rerun()
 
 with st.spinner("Talking to Analysts & Fetching Reports..."):
-    df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees = get_financial_data()
+    df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
 
 # --- חישובים ---
 usd_cash = CASH_BALANCE["USD"]
@@ -175,7 +181,7 @@ total_net_worth_usd = port_val + usd_cash + ils_cash_usd
 total_net_worth_ils = total_net_worth_usd * rate
 buying_power = usd_cash + ils_cash_usd
 
-fees_open = len(CURRENT_PORTFOLIO) * FEE
+# שורת המחץ: רווח פתוח + רווח סגור נקי - עמלות ששולמו על הפתוח
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
 
 # --- תצוגת מדדים ---
@@ -187,7 +193,7 @@ m3.metric("Buying Power", f"${buying_power:,.2f}")
 m4.metric("Total Net Profit (All Time)", f"${grand_total_profit:,.2f}", 
           delta_color="normal" if grand_total_profit>=0 else "inverse")
 
-st.caption(f"Lifetime Fees: ${total_fees:,.2f} | Open Positions: ${port_val:,.2f}")
+st.caption(f"Lifetime Fees Paid: ${total_fees:,.2f} | (Fees include historic $7.5 & new $7.0 rates)")
 st.markdown("---")
 
 # --- לשוניות ---
@@ -195,24 +201,27 @@ tab1, tab2, tab3 = st.tabs(["📊 Live Portfolio", "🧾 Buy Log", "💰 Realize
 
 with tab1:
     if not df_live.empty:
-        # הצגת הטבלה כ-HTML כדי לתמוך בצבעים של האנליסטים
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
         st.info("No active holdings.")
 
 with tab2:
     buy_rows = []
+    # מציג את העמלה שהייתה בפועל בקנייה
     for p in CURRENT_PORTFOLIO:
+        fee = p.get('Fee', CURRENT_FEE)
         buy_rows.append({
             "Symbol": p['Symbol'], "Date": p['Date'], "Qty": p['Qty'], 
-            "Price": f"${p['Buy_Price']:.2f}", "Fee": f"${FEE:.2f}",
-            "Total Cost": f"${(p['Qty']*p['Buy_Price'])+FEE:,.2f}"
+            "Price": f"${p['Buy_Price']:.2f}", "Fee": f"${fee:.2f}",
+            "Total Cost": f"${(p['Qty']*p['Buy_Price'])+fee:,.2f}"
         })
     for s in SOLD_HISTORY:
+        # בהיסטוריה שמרנו Fee_Total, אז נניח חצי מזה לקנייה
+        fee = s.get('Fee_Total', CURRENT_FEE * 2) / 2
         buy_rows.append({
-            "Symbol": f"{s['Symbol']} (Sold)", "Date": "History", "Qty": s['Qty'], 
-            "Price": f"${s['Buy_Price']:.2f}", "Fee": f"${FEE:.2f}",
-            "Total Cost": f"${(s['Qty']*s['Buy_Price'])+FEE:,.2f}"
+            "Symbol": f"{s['Symbol']} (Sold)", "Date": s['Date'], "Qty": s['Qty'], 
+            "Price": f"${s['Buy_Price']:.2f}", "Fee": f"${fee:.2f}",
+            "Total Cost": f"${(s['Qty']*s['Buy_Price'])+fee:,.2f}"
         })
     st.dataframe(pd.DataFrame(buy_rows), use_container_width=True)
 
@@ -222,12 +231,15 @@ with tab3:
     for s in SOLD_HISTORY:
         buy_cost = s['Buy_Price'] * s['Qty']
         sell_rev = s['Sell_Price'] * s['Qty']
-        net_pl = sell_rev - buy_cost - (FEE * 2)
+        # עמלה כוללת (קניה+מכירה)
+        total_fee = s.get('Fee_Total', CURRENT_FEE * 2)
+        
+        net_pl = sell_rev - buy_cost - total_fee
         color = "green" if net_pl > 0 else "red"
         sold_rows.append({
             "Symbol": s['Symbol'], "Qty": s['Qty'],
             "Buy Price": f"${s['Buy_Price']:.2f}", "Sell Price": f"${s['Sell_Price']:.2f}",
-            "Fees": f"${FEE*2:.2f}",
+            "Total Fees": f"${total_fee:.2f}",
             "Net Profit ($)": f'<span style="color:{color}; font-weight:bold;">${net_pl:,.2f}</span>'
         })
     st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
