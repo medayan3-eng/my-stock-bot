@@ -19,17 +19,16 @@ CURRENT_PORTFOLIO = [
     {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5, "Currency": "USD"},
     {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025", "Fee": 7.5, "Currency": "USD"},
     
-    # --- קרנות בנק (עם מעקף חכם) ---
-    # הוספנו Proxy_Ticker: אם הקרן לא מגיבה, נשתמש במדד הזה כדי לחשב שינוי
+    # --- קרנות בנק (ישראל) ---
     {
-        "Symbol": "1159250.TA", "Name": "MTF S&P 500", 
+        "Symbol": "1159250.TA", "Name": "MTF S&P 500 (IL)", 
         "Qty": 10, "Buy_Price": 2353.20, "Date": "11.01.2026", "Fee": 0.0, "Currency": "ILS",
-        "Proxy_Ticker": "SPY" # שימוש ב-SPY כדי לחשב את השינוי היומי
+        "Proxy_Ticker": "ES=F" # חוזים עתידיים - עובד 24/7
     },
     {
-        "Symbol": "1206549.TA", "Name": "MTF Banks 5",
+        "Symbol": "1206549.TA", "Name": "MTF Banks 5 (IL)",
         "Qty": 244, "Buy_Price": 109.23, "Date": "11.01.2026", "Fee": 0.0, "Currency": "ILS",
-        "Proxy_Ticker": "LUMI.TA" # שימוש בבנק לאומי כאינדיקטור למדד הבנקים
+        "Proxy_Ticker": "LUMI.TA" # בנק לאומי - המניה הסחירה ביותר במדד
     },
 ]
 
@@ -64,7 +63,7 @@ st.markdown("""
 # ==========================================
 # 🧠 מנוע חישובים פיננסיים
 # ==========================================
-def get_financial_data():
+def get_financial_data(manual_prices):
     try:
         usd_ils_ticker = yf.Ticker("ILS=X").history(period="1d")
         if not usd_ils_ticker.empty:
@@ -74,7 +73,7 @@ def get_financial_data():
     except:
         rate = 3.65
 
-    # איסוף כל הסימולים (גם המקוריים וגם הפרוקסי)
+    # איסוף סימולים
     all_symbols = [i['Symbol'] for i in CURRENT_PORTFOLIO]
     proxies = [i.get('Proxy_Ticker') for i in CURRENT_PORTFOLIO if 'Proxy_Ticker' in i]
     unique_symbols = list(set(all_symbols + proxies))
@@ -98,48 +97,50 @@ def get_financial_data():
         
         last_price = 0
         prev_close = 0
-        is_proxy_used = False
+        is_estimated = False
         
-        # 1. ניסיון למשוך נתונים מהטיקר המקורי
-        try:
-            t = tickers.tickers[sym]
-            last_price = t.fast_info.last_price
-            prev_close = t.fast_info.previous_close
-            
-            # בדיקה אם הנתונים תקינים (לפעמים יאהו מחזיר 0 או נתון חסר)
-            if not last_price or last_price == 0:
-                raise Exception("No Data")
-                
-            if sym.endswith(".TA"):
-                last_price /= 100
-                prev_close /= 100
-                
-        except:
-            # 2. אם נכשלנו, והוגדר Proxy - משתמשים בו
-            if proxy:
-                try:
-                    p = tickers.tickers[proxy]
-                    p_price = p.fast_info.last_price
-                    p_prev = p.fast_info.previous_close
-                    
-                    if p_price and p_prev:
-                        # חישוב אחוז השינוי של הפרוקסי
-                        proxy_change_pct = (p_price - p_prev) / p_prev
-                        
-                        # אנחנו מניחים שהמחיר הנוכחי של הקרן הוא מחיר הקנייה + השינוי היומי של המדד
-                        # (זה קירוב טוב לטווח קצר כדי לראות צבע ירוק/אדום)
-                        last_price = buy_price * (1 + proxy_change_pct)
-                        prev_close = buy_price # כדי שהשינוי היומי יחושב נכון לפי הפרוקסי
-                        is_proxy_used = True
-                except:
-                    pass
+        # 1. בדיקה אם המשתמש הזין מחיר ידני בסרגל צד
+        if sym in manual_prices and manual_prices[sym] > 0:
+            last_price = manual_prices[sym]
+            prev_close = last_price # אין היסטוריה לידני, אז השינוי היומי יתאפס (או נחשב מול הקנייה)
+            is_estimated = True # מסומן כידני
+        
+        # 2. אם אין ידני, מנסים למשוך מהטיקר המקורי
+        elif not last_price:
+            try:
+                t = tickers.tickers[sym]
+                last_price = t.fast_info.last_price
+                prev_close = t.fast_info.previous_close
+                if sym.endswith(".TA"):
+                    last_price /= 100
+                    prev_close /= 100
+            except:
+                pass
 
-        # אם עדיין אין מחיר, אי אפשר לחשב
+        # 3. אם נכשל, משתמשים בפרוקסי (חוזים עתידיים / מניית בנק)
+        if (not last_price or last_price == 0) and proxy:
+            try:
+                p = tickers.tickers[proxy]
+                p_price = p.fast_info.last_price
+                p_prev = p.fast_info.previous_close
+                
+                if p_price and p_prev:
+                    # חישוב אחוז השינוי של הפרוקסי
+                    proxy_change_pct = (p_price - p_prev) / p_prev
+                    
+                    # הערכת המחיר: מחיר קנייה * (1 + השינוי היומי)
+                    # זה ייתן את הצבע הנכון (אדום/ירוק) בטבלה
+                    last_price = buy_price * (1 + proxy_change_pct)
+                    prev_close = buy_price 
+                    is_estimated = True
+            except:
+                pass
+
         if last_price == 0:
             live_rows.append({"Symbol": display_name, "Price": "Error", "Qty": qty})
             continue
 
-        # --- חישובים פיננסיים (דולר/שקל) ---
+        # --- חישובים פיננסיים ---
         if currency == "ILS":
             price_in_usd = last_price / rate
             cost_basis_usd = (buy_price / rate) * qty
@@ -160,18 +161,13 @@ def get_financial_data():
             change_symbol = "$"
             total_pl_native = (last_price - buy_price) * qty
 
-        # חישוב שינוי יומי
         day_change = (last_price - prev_close) * qty
-        day_pct = ((last_price - prev_close) / prev_close) * 100
-        
-        # חישוב שינוי כולל
+        day_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
         total_pl_pct = ((last_price - buy_price) / buy_price) * 100
         
-        # צבירה לסיכום
         portfolio_market_value_usd += market_val_usd
         total_unrealized_pl_usd += (market_val_usd - cost_basis_usd)
         
-        # אנליסטים (לא רלוונטי לקרנות, נשאיר ריק)
         try:
             info = tickers.tickers[sym].info
             rec = info.get('recommendationKey', 'N/A').replace('_', ' ').upper()
@@ -179,15 +175,15 @@ def get_financial_data():
         except:
             analyst = "-"
 
-        # סימון אם השתמשנו בפרוקסי
-        name_suffix = " 🔄" if is_proxy_used else ""
+        # אייקון אם זה נתון ידני או מוערך
+        status_icon = "✏️" if sym in manual_prices and manual_prices[sym] > 0 else ("🔄" if is_estimated else "")
 
         def color_val(val, suffix="", prefix=""):
             c = "#2ecc71" if val >= 0 else "#e74c3c"
             return f'<span style="color:{c}; font-weight:bold;">{prefix}{val:,.2f}{suffix}</span>'
 
         live_rows.append({
-            "Symbol": f"{display_name}{name_suffix}",
+            "Symbol": f"{display_name} {status_icon}",
             "Qty": qty,
             "Price": display_price,
             "Change": color_val(day_change, "", change_symbol),
@@ -217,11 +213,24 @@ def get_financial_data():
 # ==========================================
 st.title("🌍 My Global Portfolio")
 
+# --- סרגל צד לתיקון ידני ---
+st.sidebar.header("🛠️ Manual Price Adjustment")
+st.sidebar.caption("Use this if Israeli funds data is delayed/incorrect.")
+manual_prices = {}
+# יצירת שדות קלט רק עבור קרנות ישראליות
+for p in CURRENT_PORTFOLIO:
+    if p.get("Currency") == "ILS":
+        sym = p['Symbol']
+        name = p.get("Name", sym)
+        # ערך ברירת מחדל 0.0 אומר "תשתמש באוטומטי"
+        price_input = st.sidebar.number_input(f"{name} Price (₪)", min_value=0.0, value=0.0, step=0.1)
+        manual_prices[sym] = price_input
+
 if st.button("🔄 REFRESH LIVE DATA", type="primary", use_container_width=True):
     st.rerun()
 
-with st.spinner("Fetching data (using proxies for IL funds)..."):
-    df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
+with st.spinner("Analyzing Global Markets (Futures & Live)..."):
+    df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data(manual_prices)
 
 usd_cash = CASH_BALANCE["USD"]
 ils_cash_usd = CASH_BALANCE["ILS"] / rate
@@ -242,7 +251,7 @@ tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🧾 Buy Log", "💰 Realized P
 
 with tab1:
     if not df_live.empty:
-        st.caption("🔄 = Data estimated based on Index Proxy (SPY / Bank Leumi)")
+        st.caption("🔄 = Data based on Futures/Index Proxy | ✏️ = Manual Price Used")
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
         st.info("No active holdings.")
