@@ -7,9 +7,6 @@ from datetime import datetime
 # 💾 נתוני המשתמש
 # ==========================================
 
-# 1. יתרות מזומן
-# דולר: היה 1348.40. ירד 2227 (קניית VRTX). יתרה: -878.6 (מינוס מעיד על שימוש במרג'ין או צורך בהמרה)
-# שקל: נשאר אותו דבר
 CASH_BALANCE = {
     "USD": -878.60, 
     "ILS": 6422.39  
@@ -21,16 +18,14 @@ CURRENT_PORTFOLIO = [
     {"Symbol": "AMZN", "Qty": 6, "Buy_Price": 227.00, "Date": "22.12.2025", "Fee": 7.5, "Currency": "USD"},
     {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5, "Currency": "USD"},
     {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025", "Fee": 7.5, "Currency": "USD"},
-    
-    # המניה החדשה מהיום
     {"Symbol": "VRTX", "Qty": 5, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee": 7.0, "Currency": "USD"},
     
     # --- קרנות בנק (ישראל) ---
-    # עלות כוללת: 23,532 ש"ח | כמות: 10
+    # MTF S&P 500 (מספר 1159250)
     {"Symbol": "1159250.TA", "Name": "MTF S&P 500 (IL)", 
-     "Qty": 10, "Buy_Price": 2353.20, "Date": "11.01.2026", "Fee": 0.0, "Currency": "ILS"},
+     "Qty": 10, "Buy_Price": 2353.10, "Date": "11.01.2026", "Fee": 0.0, "Currency": "ILS"},
     
-    # עלות כוללת: 26,652.64 ש"ח | כמות: 244
+    # MTF Banks 5 (מספר 1206549)
     {"Symbol": "1206549.TA", "Name": "MTF Banks 5 (IL)",
      "Qty": 244, "Buy_Price": 109.232, "Date": "11.01.2026", "Fee": 0.0, "Currency": "ILS"},
 ]
@@ -99,47 +94,55 @@ def get_financial_data(manual_prices):
         prev_close = 0
         
         # 1. בדיקה אם יש מחיר ידני (מהסיידבר)
-        if sym in manual_prices and manual_prices[sym] > 0:
-            last_price = manual_prices[sym]
-            # במצב ידני, אין לנו נתון סגירה קודם אמין, נניח שהמחיר לא השתנה מהאתמול כדי לא לשבור את הגרף
-            prev_close = last_price 
+        # המשתמש יכול להזין בשקלים או באגורות, הקוד יתמודד
+        manual_val = manual_prices.get(sym, 0)
+        
+        if manual_val > 0:
+            last_price = manual_val
+            # אם המשתמש הזין באגורות (מספר גדול מ-500 בדרך כלל לקרנות האלו), נמיר לשקלים
+            if sym.endswith(".TA") and last_price > 500: 
+                last_price = last_price / 100
+                
+            prev_close = last_price # באינפוט ידני אין לנו היסטוריה
         else:
-            # 2. משיכה מיאהו
+            # 2. משיכה מיאהו (אם אין ידני)
             try:
                 t = tickers.tickers[sym]
-                # מנסים למשוך מחיר אחרון
-                last_price = t.fast_info.last_price
-                prev_close = t.fast_info.previous_close
-                
-                # --- תיקון קריטי לישראל ---
-                # מניות בת"א נסחרות באגורות ביאהו. אם המספר גדול (מעל 500 למשל לקרן), נחלק ב-100
-                if sym.endswith(".TA"):
-                    last_price = last_price / 100
-                    prev_close = prev_close / 100
+                # מנסים למשוך היסטוריה קצרה במקום fast_info שקורס לקרנות האלו
+                hist = t.history(period="5d")
+                if not hist.empty:
+                    last_price = hist['Close'].iloc[-1]
+                    if len(hist) > 1:
+                        prev_close = hist['Close'].iloc[-2]
+                    else:
+                        prev_close = last_price
                     
+                    # המרה מאגורות לשקלים
+                    if sym.endswith(".TA"):
+                        last_price /= 100
+                        prev_close /= 100
             except:
                 pass
 
+        # מנגנון הגנה: אם אין מחיר, לא שוברים את השורה!
+        # מציגים את השורה עם הערה שצריך לעדכן
+        price_missing = False
         if not last_price or last_price == 0:
-            live_rows.append({"Symbol": display_name, "Price": "Error", "Qty": qty})
-            continue
+            last_price = buy_price # כדי שהחישוב לא יקרוס
+            prev_close = buy_price
+            price_missing = True
 
         # --- חישובים ---
         if currency == "ILS":
-            # המרות לדולר לטובת השורה התחתונה
             price_in_usd = last_price / rate
             cost_basis_usd = (buy_price / rate) * qty
             market_val_usd = price_in_usd * qty
             
-            # תצוגה בשקלים
             display_price = f"₪{last_price:,.2f}"
             display_cost = f"₪{buy_price:,.2f}"
             display_val = f"₪{last_price * qty:,.2f}"
             change_symbol = "₪"
-            
-            # רווח/הפסד נומינלי בשקלים (מהקנייה ועד היום)
             total_pl_native = (last_price - buy_price) * qty
-            
         else:
             cost_basis_usd = buy_price * qty
             market_val_usd = last_price * qty
@@ -148,17 +151,15 @@ def get_financial_data(manual_prices):
             display_cost = f"${buy_price:,.2f}"
             display_val = f"${market_val_usd:,.2f}"
             change_symbol = "$"
-            
             total_pl_native = (last_price - buy_price) * qty
 
         # שינוי יומי
         day_change = (last_price - prev_close) * qty
         day_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
         
-        # שינוי כולל (תשואה)
+        # שינוי כולל
         total_pl_pct = ((last_price - buy_price) / buy_price) * 100
         
-        # צבירה לסיכום
         portfolio_market_value_usd += market_val_usd
         total_unrealized_pl_usd += (market_val_usd - cost_basis_usd)
         
@@ -170,18 +171,33 @@ def get_financial_data(manual_prices):
         except:
             analyst = "-"
 
+        # עיצוב מיוחד אם המחיר חסר
+        if price_missing:
+            display_price = "⚠️ Update in Sidebar"
+            display_val = "Pending..."
+            analyst = "-"
+            day_change = 0
+            day_pct = 0
+            total_pl_native = 0
+            total_pl_pct = 0
+
+        # אייקון סטטוס
+        status = ""
+        if manual_val > 0: status = "✏️ (Manual)"
+        elif price_missing: status = "❌ (No Data)"
+
         def color_val(val, suffix="", prefix=""):
             c = "#2ecc71" if val >= 0 else "#e74c3c"
             return f'<span style="color:{c}; font-weight:bold;">{prefix}{val:,.2f}{suffix}</span>'
 
         live_rows.append({
-            "Symbol": display_name,
+            "Symbol": f"{display_name} {status}",
             "Qty": qty,
             "Price": display_price,
-            "Change Today": f"{color_val(day_change, '', change_symbol)} <br><small>{color_val(day_pct, '%')}</small>",
+            "Change Today": f"{color_val(day_change, '', change_symbol)} <br><small>{color_val(day_pct, '%')}</small>" if not price_missing else "-",
             "Avg Cost": display_cost,
             "Value": display_val,
-            "Total P/L": f"{color_val(total_pl_native, '', change_symbol)} <br><small>{color_val(total_pl_pct, '%')}</small>",
+            "Total P/L": f"{color_val(total_pl_native, '', change_symbol)} <br><small>{color_val(total_pl_pct, '%')}</small>" if not price_missing else "-",
             "Analysts": analyst,
             "Next Report": EARNINGS_CALENDAR.get(sym, "-")
         })
@@ -204,15 +220,17 @@ def get_financial_data(manual_prices):
 # ==========================================
 st.title("🌍 My Global Portfolio")
 
-# סרגל צד לתיקון ידני למקרה שיאהו מזייף
-st.sidebar.header("🛠️ Manual Price Fix")
-st.sidebar.caption("If IL funds data is incorrect, enter price here:")
+# --- סרגל צד לתיקון ידני ---
+# זה הפתרון לקרנות הישראליות!
+st.sidebar.header("🛠️ Israeli Funds Update")
+st.sidebar.info("Yahoo Finance sometimes blocks Israeli fund data. Enter price manually here from your bank app if needed.")
 manual_prices = {}
 for p in CURRENT_PORTFOLIO:
     if p.get("Currency") == "ILS":
         sym = p['Symbol']
         name = p.get("Name", sym)
-        val = st.sidebar.number_input(f"{name} (₪)", min_value=0.0, value=0.0, step=0.1)
+        # ברירת מחדל 0
+        val = st.sidebar.number_input(f"{name} (Price in ₪ or Agorot)", min_value=0.0, value=0.0, step=0.1)
         manual_prices[sym] = val
 
 if st.button("🔄 REFRESH LIVE DATA", type="primary", use_container_width=True):
@@ -242,6 +260,7 @@ tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🧾 Buy Log", "💰 Realized P
 
 with tab1:
     if not df_live.empty:
+        st.caption("Tip: Use the Sidebar (top-left arrow on mobile) to update Israeli funds if they show 'Update in Sidebar'.")
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
         st.info("No active holdings.")
