@@ -7,43 +7,38 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן
-# חישוב מהיר: אחרי כל המכירות (VRTX, PLTR, AMZN) היית בפלוס של כ-3,014$.
-# קניית ALB עלתה כ-4,479$. לכן היתרה במינוס.
+# 1. יתרות מזומן (לפי צילום מסך עדכני)
+# זה מיישר קו עם הבנק ומבטל את הפערים בחישוב ה-Net Worth
 CASH_BALANCE = {
-    "USD": -1465.00, 
-    "ILS": 6422.39 
+    "USD": -21.02, 
+    "ILS": 798.45 
 }
 
-# 2. התיק הנוכחי (החזקות פתוחות)
+# 2. התיק הנוכחי (החזקות פתוחות בלבד)
 CURRENT_PORTFOLIO = [
+    # החזקה חדשה
+    {"Symbol": "ALB",  "Qty": 26, "Buy_Price": 172.00, "Date": "20.01.2026", "Fee": 7.0},
+    
     # החזקות ותיקות
     {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5},
     {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025", "Fee": 7.5},
-    
-    # החזקה חדשה
-    {"Symbol": "ALB",  "Qty": 26, "Buy_Price": 172.00, "Date": "20.01.2026", "Fee": 7.0},
 ]
 
 # 3. היסטוריית מכירות (עסקאות סגורות)
 SOLD_HISTORY = [
-    # היסטוריה ישנה
+    # מכירות אחרונות (15.01.2026)
+    {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, # עמלה 7.5+7
+    {"Symbol": "AMZN", "Qty": 6, "Sell_Price": 233.80, "Buy_Price": 227.00, "Date": "15.01.2026", "Fee_Total": 14.5},
+    {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0}, # עמלה 7+7
+    
+    # מכירות ישנות יותר
     {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "OSS",  "Qty": 165, "Sell_Price": 11.95, "Buy_Price": 11.99, "Date": "13.01.2026", "Fee_Total": 14.0},
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
-    
-    # מכירות חדשות (15.01.2026)
-    # PLTR: קנייה 183.36 (עמלה 7.5) | מכירה 174 (עמלה 7) -> סה"כ עמלות 14.5
-    {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5},
-    
-    # AMZN: קנייה 227 (עמלה 7.5) | מכירה 233.80 (עמלה 7)
-    {"Symbol": "AMZN", "Qty": 6, "Sell_Price": 233.80, "Buy_Price": 227.00, "Date": "15.01.2026", "Fee_Total": 14.5},
-    
-    # VRTX: קנייה 444 (עמלה 7) | מכירה 432.16 (עמלה 7)
-    {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0},
 ]
 
+# תאריכי דוחות (מתעדכן אוטומטית לפי הצורך, אלו הידועים)
 EARNINGS_CALENDAR = {
     "VRT": "12/02/26",
     "GEV": "28/01/26",
@@ -167,22 +162,25 @@ st.title("🚀 My Stocks Portfolio")
 if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
     st.rerun()
 
-with st.spinner("Analyzing US Market..."):
+with st.spinner("Analyzing Market..."):
     df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
 
+# חישוב שווי נקי מדוייק לפי המזומן בצילום המסך
 usd_cash = CASH_BALANCE["USD"]
 ils_cash_usd = CASH_BALANCE["ILS"] / rate
-total_cash_usd = usd_cash + ils_cash_usd
+total_liquid_cash_usd = usd_cash + ils_cash_usd
 
-total_net_worth_usd = port_val + total_cash_usd
+total_net_worth_usd = port_val + total_liquid_cash_usd
 total_net_worth_ils = total_net_worth_usd * rate
+
+# חישוב רווח כולל (כל הזמנים)
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
 
 st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
 m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f}")
-m3.metric("Liquid Cash ($)", f"${total_cash_usd:,.2f}", delta_color="off")
+m3.metric("Liquid Cash ($)", f"${total_liquid_cash_usd:,.2f}", help=f"Cash: ${usd_cash} + ₪{CASH_BALANCE['ILS']}")
 m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", 
           delta_color="normal" if grand_total_profit>=0 else "inverse")
 
