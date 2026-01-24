@@ -7,34 +7,29 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן (עודכן לאחר מכירת GEV)
-# היינו במינוס 21.02$, נכנסו 1301.42$ נטו
+# 1. יתרות מזומן (לפי הדיווח האחרון שלך)
 CASH_BALANCE = {
     "USD": 1280.40, 
     "ILS": 798.45 
 }
 
-# 2. התיק הנוכחי (החזקות פתוחות בלבד)
+# 2. התיק הנוכחי
 CURRENT_PORTFOLIO = [
-    # החזקה חדשה
     {"Symbol": "ALB",  "Qty": 26, "Buy_Price": 172.00, "Date": "20.01.2026", "Fee": 7.0},
-    
-    # החזקות ותיקות
     {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5},
 ]
 
-# 3. היסטוריית מכירות (עסקאות סגורות)
+# 3. היסטוריית מכירות (סגורות)
 SOLD_HISTORY = [
-    # מכירה אחרונה (24.01.2026)
-    # GEV: קנייה 700 (עמלה 7.5) | מכירה 654.21 (עמלה 7) -> סה"כ עמלות 14.5
+    # מכירות אחרונות (24.01.2026)
     {"Symbol": "GEV", "Qty": 2, "Sell_Price": 654.21, "Buy_Price": 700.00, "Date": "24.01.2026", "Fee_Total": 14.5},
 
-    # מכירות קודמות (15.01.2026)
+    # מכירות 15.01.2026
     {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, 
     {"Symbol": "AMZN", "Qty": 6, "Sell_Price": 233.80, "Buy_Price": 227.00, "Date": "15.01.2026", "Fee_Total": 14.5},
     {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0},
     
-    # מכירות ישנות יותר
+    # ישנות
     {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "OSS",  "Qty": 165, "Sell_Price": 11.95, "Buy_Price": 11.99, "Date": "13.01.2026", "Fee_Total": 14.0},
@@ -65,7 +60,7 @@ st.markdown("""
 # 🧠 מנוע חישובים פיננסיים
 # ==========================================
 def get_financial_data():
-    # שער דולר
+    # משיכת שער דולר (לצורך המרות בלבד, לא להצגה כמדד רווח)
     try:
         usd_ils_ticker = yf.Ticker("ILS=X").history(period="1d")
         if not usd_ils_ticker.empty:
@@ -101,7 +96,7 @@ def get_financial_data():
             pass
 
         if not last_price or last_price == 0:
-            last_price = buy_price # Fallback
+            last_price = buy_price
             prev_close = buy_price
 
         # חישובים
@@ -143,7 +138,7 @@ def get_financial_data():
             "Next Report": EARNINGS_CALENDAR.get(sym, "-")
         })
 
-    # --- היסטוריה ---
+    # --- היסטוריה (חישוב רווח ממומש כולל) ---
     total_realized_pl_net_usd = 0
     fees_paid_on_sold_total = 0
     for s in SOLD_HISTORY:
@@ -167,7 +162,7 @@ if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
 with st.spinner("Analyzing Market..."):
     df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
 
-# חישוב שווי נקי
+# חישובים סופיים
 usd_cash = CASH_BALANCE["USD"]
 ils_cash_usd = CASH_BALANCE["ILS"] / rate
 total_liquid_cash_usd = usd_cash + ils_cash_usd
@@ -175,19 +170,35 @@ total_liquid_cash_usd = usd_cash + ils_cash_usd
 total_net_worth_usd = port_val + total_liquid_cash_usd
 total_net_worth_ils = total_net_worth_usd * rate
 
-# חישוב רווח כולל (כל הזמנים)
+# רווח נקי כולל (פתוח + סגור - עמלות פתוח)
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
 
+# חישוב אחוז תשואה כולל על התיק (ROI)
+# ההון המושקע (בערך) = השווי הנוכחי פחות הרווח שעשינו
+invested_capital = total_net_worth_usd - grand_total_profit
+if invested_capital > 0:
+    portfolio_return_pct = (grand_total_profit / invested_capital) * 100
+else:
+    portfolio_return_pct = 0
+
+# --- תצוגת המדדים ---
 st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
+
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
-m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f}")
+
+# כאן השינוי: במקום Rate, מציגים את התשואה
+color_roi = "normal" if portfolio_return_pct >= 0 else "inverse"
+m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Return: {portfolio_return_pct:.2f}%", delta_color=color_roi)
+
 m3.metric("Liquid Cash ($)", f"${total_liquid_cash_usd:,.2f}", help=f"Cash: ${usd_cash} + ₪{CASH_BALANCE['ILS']}")
+
 m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", 
           delta_color="normal" if grand_total_profit>=0 else "inverse")
 
 st.markdown("---")
 
+# --- לשוניות ---
 tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🧾 Buy Log", "💰 Realized P/L"])
 
 with tab1:
@@ -207,6 +218,7 @@ with tab2:
 
 with tab3:
     st.subheader("💸 Realized P/L (Net)")
+    
     sold_rows = []
     for s in SOLD_HISTORY:
         buy_cost = s['Buy_Price'] * s['Qty']
@@ -219,3 +231,14 @@ with tab3:
             "Net Profit ($)": f'<span style="color:{c}; font-weight:bold;">${net:,.2f}</span>'
         })
     st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    # סיכום רווח ממומש בתחתית העמוד (מודגש)
+    total_realized_color = "green" if realized_pl_net >= 0 else "red"
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
+        <h3 style="margin:0;">Total Realized Profit (Closed Positions)</h3>
+        <h1 style="color: {total_realized_color}; margin:0;">${realized_pl_net:,.2f}</h1>
+        <small>After all fees & losses</small>
+    </div>
+    """, unsafe_allow_html=True)
