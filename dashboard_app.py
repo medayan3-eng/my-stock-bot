@@ -7,10 +7,10 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן (לפי צילום מסך עדכני)
-# זה מיישר קו עם הבנק ומבטל את הפערים בחישוב ה-Net Worth
+# 1. יתרות מזומן (עודכן לאחר מכירת GEV)
+# היינו במינוס 21.02$, נכנסו 1301.42$ נטו
 CASH_BALANCE = {
-    "USD": -21.02, 
+    "USD": 1280.40, 
     "ILS": 798.45 
 }
 
@@ -21,15 +21,18 @@ CURRENT_PORTFOLIO = [
     
     # החזקות ותיקות
     {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5},
-    {"Symbol": "GEV",  "Qty": 2, "Buy_Price": 700.00, "Date": "10.12.2025", "Fee": 7.5},
 ]
 
 # 3. היסטוריית מכירות (עסקאות סגורות)
 SOLD_HISTORY = [
-    # מכירות אחרונות (15.01.2026)
-    {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, # עמלה 7.5+7
+    # מכירה אחרונה (24.01.2026)
+    # GEV: קנייה 700 (עמלה 7.5) | מכירה 654.21 (עמלה 7) -> סה"כ עמלות 14.5
+    {"Symbol": "GEV", "Qty": 2, "Sell_Price": 654.21, "Buy_Price": 700.00, "Date": "24.01.2026", "Fee_Total": 14.5},
+
+    # מכירות קודמות (15.01.2026)
+    {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, 
     {"Symbol": "AMZN", "Qty": 6, "Sell_Price": 233.80, "Buy_Price": 227.00, "Date": "15.01.2026", "Fee_Total": 14.5},
-    {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0}, # עמלה 7+7
+    {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0},
     
     # מכירות ישנות יותר
     {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026", "Fee_Total": 15.0},
@@ -38,10 +41,9 @@ SOLD_HISTORY = [
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
-# תאריכי דוחות (מתעדכן אוטומטית לפי הצורך, אלו הידועים)
+# תאריכי דוחות
 EARNINGS_CALENDAR = {
     "VRT": "12/02/26",
-    "GEV": "28/01/26",
     "ALB": "18/02/26"
 }
 
@@ -165,7 +167,7 @@ if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
 with st.spinner("Analyzing Market..."):
     df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
 
-# חישוב שווי נקי מדוייק לפי המזומן בצילום המסך
+# חישוב שווי נקי
 usd_cash = CASH_BALANCE["USD"]
 ils_cash_usd = CASH_BALANCE["ILS"] / rate
 total_liquid_cash_usd = usd_cash + ils_cash_usd
