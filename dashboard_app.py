@@ -4,32 +4,42 @@ import yfinance as yf
 from datetime import datetime
 
 # ==========================================
-# 💾 נתוני המשתמש
+# 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
+# 1. יתרות מזומן (מעודכן לאחר מכירת VRT)
 CASH_BALANCE = {
-    "USD": 1280.40, 
+    "USD": 2737.40, 
     "ILS": 798.45 
 }
 
+# 2. התיק הנוכחי
+# נשארנו כרגע רק עם ALB
 CURRENT_PORTFOLIO = [
     {"Symbol": "ALB",  "Qty": 26, "Buy_Price": 172.00, "Date": "20.01.2026", "Fee": 7.0},
-    {"Symbol": "VRT",  "Qty": 8, "Buy_Price": 163.00, "Date": "22.12.2025", "Fee": 7.5},
 ]
 
+# 3. היסטוריית מכירות (סגורות)
 SOLD_HISTORY = [
+    # מכירה חדשה (27.01.2026)
+    # VRT: קנייה 163 (עמלה 7.5) | מכירה 183 (עמלה 7) -> סה"כ עמלות 14.5
+    {"Symbol": "VRT", "Qty": 8, "Sell_Price": 183.00, "Buy_Price": 163.00, "Date": "27.01.2026", "Fee_Total": 14.5},
+
+    # מכירות קודמות
     {"Symbol": "GEV", "Qty": 2, "Sell_Price": 654.21, "Buy_Price": 700.00, "Date": "24.01.2026", "Fee_Total": 14.5},
     {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, 
     {"Symbol": "AMZN", "Qty": 6, "Sell_Price": 233.80, "Buy_Price": 227.00, "Date": "15.01.2026", "Fee_Total": 14.5},
     {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0},
+    
+    # ישנות
     {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "OSS",  "Qty": 165, "Sell_Price": 11.95, "Buy_Price": 11.99, "Date": "13.01.2026", "Fee_Total": 14.0},
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
+# תאריכי דוחות
 EARNINGS_CALENDAR = {
-    "VRT": "12/02/26",
     "ALB": "18/02/26"
 }
 
@@ -51,7 +61,6 @@ st.markdown("""
 # 🧠 מנוע חישובים
 # ==========================================
 def get_financial_data():
-    # משיכת שער דולר אונליין
     try:
         usd_ils_ticker = yf.Ticker("ILS=X").history(period="1d")
         if not usd_ils_ticker.empty:
@@ -152,25 +161,23 @@ total_net_worth_usd = port_val + total_liquid_cash_usd
 total_net_worth_ils = total_net_worth_usd * rate
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
 
-# חישוב תשואה (ROI)
 invested_capital = total_net_worth_usd - grand_total_profit
 portfolio_return_pct = (grand_total_profit / invested_capital) * 100 if invested_capital > 0 else 0
 
 st.markdown("### 🏦 Account Snapshot")
 
-# שורה ראשונה: נתונים כלליים
 c1, c2, c3 = st.columns(3)
 c1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
-c2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}")
-c3.metric("Live USD Rate", f"₪{rate:.3f}") # כאן השער
+color_roi = "normal" if portfolio_return_pct >= 0 else "inverse"
+c2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Return: {portfolio_return_pct:.2f}%", delta_color=color_roi)
+c3.metric("Live USD Rate", f"₪{rate:.3f}")
 
 st.markdown("---")
 
-# שורה שנייה: ביצועים
 c4, c5, c6 = st.columns(3)
 c4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", delta_color="normal" if grand_total_profit>=0 else "inverse")
-c5.metric("Total Return (ROI)", f"{portfolio_return_pct:.2f}%", delta_color="normal" if portfolio_return_pct>=0 else "inverse")
-c6.metric("Liquid Cash", f"${total_liquid_cash_usd:,.2f}")
+c5.metric("Liquid Cash", f"${total_liquid_cash_usd:,.2f}", help=f"Cash: ${usd_cash} + ₪{CASH_BALANCE['ILS']}")
+c6.metric("Realized Profit", f"${realized_pl_net:,.2f}", delta_color="normal" if realized_pl_net >=0 else "inverse")
 
 st.markdown("---")
 
@@ -206,7 +213,6 @@ with tab3:
         })
     st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
     
-    # סיכום מודגש
     total_realized_color = "green" if realized_pl_net >= 0 else "red"
     st.markdown(f"""
     <div style="text-align: center; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background-color: #f0f2f6;">
