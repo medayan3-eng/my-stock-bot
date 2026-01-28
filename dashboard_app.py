@@ -7,22 +7,25 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן (מעודכן לאחר מכירת VRT)
+# 1. יתרות מזומן (לאחר קניית SLI)
+# יתרה קודמת: 2737.40 | עלות קנייה כולל עמלה: 2863.70 | יתרה חדשה: -126.30
 CASH_BALANCE = {
-    "USD": 2737.40, 
+    "USD": -126.30, 
     "ILS": 798.45 
 }
 
 # 2. התיק הנוכחי
-# נשארנו כרגע רק עם ALB
 CURRENT_PORTFOLIO = [
+    # החזקה חדשה (27.01.2026)
+    {"Symbol": "SLI",  "Qty": 530, "Buy_Price": 5.39, "Date": "27.01.2026", "Fee": 7.0},
+    
+    # החזקה קיימת
     {"Symbol": "ALB",  "Qty": 26, "Buy_Price": 172.00, "Date": "20.01.2026", "Fee": 7.0},
 ]
 
 # 3. היסטוריית מכירות (סגורות)
 SOLD_HISTORY = [
-    # מכירה חדשה (27.01.2026)
-    # VRT: קנייה 163 (עמלה 7.5) | מכירה 183 (עמלה 7) -> סה"כ עמלות 14.5
+    # מכירות 27.01.2026
     {"Symbol": "VRT", "Qty": 8, "Sell_Price": 183.00, "Buy_Price": 163.00, "Date": "27.01.2026", "Fee_Total": 14.5},
 
     # מכירות קודמות
@@ -40,7 +43,8 @@ SOLD_HISTORY = [
 
 # תאריכי דוחות
 EARNINGS_CALENDAR = {
-    "ALB": "18/02/26"
+    "ALB": "18/02/26",
+    "SLI": "TBD" # תאריך לא סופי, בדרך כלל מדווחים בפברואר/מאי
 }
 
 CURRENT_FEE = 7.0 
