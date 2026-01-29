@@ -7,45 +7,47 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן (לאחר קניית SLI)
-# יתרה קודמת: 2737.40 | עלות קנייה כולל עמלה: 2863.70 | יתרה חדשה: -126.30
+# 1. יתרות מזומן (לאחר כל המכירות והסיבוב היומי)
+# התחלה: -126.30
+# SLI נטו: +2,616.50
+# ALB נטו: +4,610.60
+# MP רווח נטו (אחרי קניה ומכירה): +82.76
+# סה"כ חדש: 7,183.56
 CASH_BALANCE = {
-    "USD": -126.30, 
+    "USD": 7183.56, 
     "ILS": 798.45 
 }
 
 # 2. התיק הנוכחי
-CURRENT_PORTFOLIO = [
-    # החזקה חדשה (27.01.2026)
-    {"Symbol": "SLI",  "Qty": 530, "Buy_Price": 5.39, "Date": "27.01.2026", "Fee": 7.0},
-    
-    # החזקה קיימת
-    {"Symbol": "ALB",  "Qty": 26, "Buy_Price": 172.00, "Date": "20.01.2026", "Fee": 7.0},
-]
+# התיק ריק כרגע (הכל נמכר)
+CURRENT_PORTFOLIO = []
 
 # 3. היסטוריית מכירות (סגורות)
 SOLD_HISTORY = [
-    # מכירות 27.01.2026
-    {"Symbol": "VRT", "Qty": 8, "Sell_Price": 183.00, "Buy_Price": 163.00, "Date": "27.01.2026", "Fee_Total": 14.5},
+    # --- פעולות מהיום (29.01.2026) ---
+    # MP: קנייה 59.77 | מכירה 61.41 | כמות 59 | עמלה 14 (7+7)
+    {"Symbol": "MP", "Qty": 59, "Sell_Price": 61.41, "Buy_Price": 59.77, "Date": "29.01.2026", "Fee_Total": 14.0},
 
-    # מכירות קודמות
+    # ALB: קנייה 172 | מכירה 177.60 | כמות 26 | עמלה 14
+    {"Symbol": "ALB", "Qty": 26, "Sell_Price": 177.60, "Buy_Price": 172.00, "Date": "29.01.2026", "Fee_Total": 14.0},
+
+    # SLI: קנייה 5.39 | מכירה 4.95 | כמות 530 | עמלה 14
+    {"Symbol": "SLI", "Qty": 530, "Sell_Price": 4.95, "Buy_Price": 5.39, "Date": "29.01.2026", "Fee_Total": 14.0},
+
+    # --- היסטוריה קודמת ---
+    {"Symbol": "VRT", "Qty": 8, "Sell_Price": 183.00, "Buy_Price": 163.00, "Date": "27.01.2026", "Fee_Total": 14.5},
     {"Symbol": "GEV", "Qty": 2, "Sell_Price": 654.21, "Buy_Price": 700.00, "Date": "24.01.2026", "Fee_Total": 14.5},
     {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, 
     {"Symbol": "AMZN", "Qty": 6, "Sell_Price": 233.80, "Buy_Price": 227.00, "Date": "15.01.2026", "Fee_Total": 14.5},
     {"Symbol": "VRTX", "Qty": 5, "Sell_Price": 432.16, "Buy_Price": 444.00, "Date": "15.01.2026", "Fee_Total": 14.0},
-    
-    # ישנות
     {"Symbol": "RKLB", "Qty": 10, "Sell_Price": 85.00, "Buy_Price": 53.80, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "MU",   "Qty": 2,  "Sell_Price": 325.00, "Buy_Price": 238.68, "Date": "08.01.2026", "Fee_Total": 15.0},
     {"Symbol": "OSS",  "Qty": 165, "Sell_Price": 11.95, "Buy_Price": 11.99, "Date": "13.01.2026", "Fee_Total": 14.0},
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
-# תאריכי דוחות
-EARNINGS_CALENDAR = {
-    "ALB": "18/02/26",
-    "SLI": "TBD" # תאריך לא סופי, בדרך כלל מדווחים בפברואר/מאי
-}
+# תאריכי דוחות (לא רלוונטי כרגע כי התיק ריק, אבל נשמור למקרה שתקנה חזרה)
+EARNINGS_CALENDAR = {}
 
 CURRENT_FEE = 7.0 
 
@@ -75,7 +77,18 @@ def get_financial_data():
         rate = 3.65
 
     symbols = [i['Symbol'] for i in CURRENT_PORTFOLIO]
-    if not symbols: return pd.DataFrame(), rate, 0, 0, 0, 0, 0
+    # אם התיק ריק, מחזירים רק נתונים בסיסיים
+    if not symbols: 
+        # מחשבים רק היסטוריה
+        total_realized_pl_net_usd = 0
+        fees_paid_on_sold_total = 0
+        for s in SOLD_HISTORY:
+            gross = (s['Sell_Price'] - s['Buy_Price']) * s['Qty']
+            fees = s.get('Fee_Total', CURRENT_FEE * 2)
+            total_realized_pl_net_usd += (gross - fees)
+            fees_paid_on_sold_total += fees
+            
+        return pd.DataFrame(), rate, 0, 0, total_realized_pl_net_usd, fees_paid_on_sold_total, 0
 
     tickers = yf.Tickers(" ".join(symbols))
     
@@ -161,6 +174,7 @@ with st.spinner("Talking to Wall St..."):
 usd_cash = CASH_BALANCE["USD"]
 ils_cash_usd = CASH_BALANCE["ILS"] / rate
 total_liquid_cash_usd = usd_cash + ils_cash_usd
+
 total_net_worth_usd = port_val + total_liquid_cash_usd
 total_net_worth_ils = total_net_worth_usd * rate
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
@@ -191,7 +205,7 @@ with tab1:
     if not df_live.empty:
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
-        st.info("No active holdings.")
+        st.info("No active holdings. You are 100% Cash! 💵")
 
 with tab2:
     buy_rows = []
@@ -200,7 +214,11 @@ with tab2:
         cost_d = (p['Qty']*p['Buy_Price'])+fee
         buy_rows.append({"Symbol": p['Symbol'], "Date": p['Date'], "Qty": p['Qty'], 
                          "Price": f"${p['Buy_Price']:,.2f}", "Fee": fee, "Total Cost": f"${cost_d:,.2f}"})
-    st.dataframe(pd.DataFrame(buy_rows), use_container_width=True)
+    # אם התיק ריק, מציגים הודעה
+    if not buy_rows:
+        st.caption("No open positions.")
+    else:
+        st.dataframe(pd.DataFrame(buy_rows), use_container_width=True)
 
 with tab3:
     st.subheader("💸 Realized P/L (Net)")
