@@ -7,34 +7,43 @@ from datetime import datetime
 # 💾 נתוני המשתמש (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן (לאחר כל המכירות והסיבוב היומי)
-# התחלה: -126.30
-# SLI נטו: +2,616.50
-# ALB נטו: +4,610.60
-# MP רווח נטו (אחרי קניה ומכירה): +82.76
-# סה"כ חדש: 7,183.56
+# 1. יתרות מזומן (מחושב לאחר כל הקניות והמכירות האחרונות)
+# התחלה: 7,183.56
+# רווח/הפסד ממימושים (KLAC, DIS, BARK, INOD): -172.07
+# עלות קניית WFRD (כולל עמלה): -2,543.65
+# עלות קניית SMH (כולל עמלה): -4,455.40
+# יתרה סופית: 12.44
 CASH_BALANCE = {
-    "USD": 7183.56, 
+    "USD": 12.44, 
     "ILS": 798.45 
 }
 
-# 2. התיק הנוכחי
-# התיק ריק כרגע (הכל נמכר)
-CURRENT_PORTFOLIO = []
+# 2. התיק הנוכחי (פוזיציות פתוחות)
+CURRENT_PORTFOLIO = [
+    # קניות מאתמול (נניח 03.02.2026)
+    {"Symbol": "WFRD", "Qty": 27, "Buy_Price": 93.95, "Date": "03.02.2026", "Fee": 7.0},
+    {"Symbol": "SMH",  "Qty": 11, "Buy_Price": 404.40, "Date": "03.02.2026", "Fee": 7.0},
+]
 
 # 3. היסטוריית מכירות (סגורות)
 SOLD_HISTORY = [
-    # --- פעולות מהיום (29.01.2026) ---
-    # MP: קנייה 59.77 | מכירה 61.41 | כמות 59 | עמלה 14 (7+7)
+    # --- עסקאות מלפני 3 ימים (נניח 01.02.2026) ---
+    # KLAC: קנייה 1433 | מכירה 1407.74 | כמות 2 | עמלה 14
+    {"Symbol": "KLAC", "Qty": 2, "Sell_Price": 1407.74, "Buy_Price": 1433.00, "Date": "01.02.2026", "Fee_Total": 14.0},
+
+    # DIS: קנייה 105 | מכירה 4300.80/40 = 107.52 | כמות 40 | עמלה 14
+    {"Symbol": "DIS", "Qty": 40, "Sell_Price": 107.52, "Buy_Price": 105.00, "Date": "01.02.2026", "Fee_Total": 14.0},
+
+    # BARK: קנייה 0.89 | מכירה 0.8501 | כמות 2500 | עמלה 14
+    {"Symbol": "BARK", "Qty": 2500, "Sell_Price": 0.8501, "Buy_Price": 0.89, "Date": "01.02.2026", "Fee_Total": 14.0},
+
+    # INOD: קנייה 56.3 | מכירה 54.82 | כמות 45 | עמלה 14
+    {"Symbol": "INOD", "Qty": 45, "Sell_Price": 54.82, "Buy_Price": 56.30, "Date": "01.02.2026", "Fee_Total": 14.0},
+
+    # --- עסקאות קודמות ---
     {"Symbol": "MP", "Qty": 59, "Sell_Price": 61.41, "Buy_Price": 59.77, "Date": "29.01.2026", "Fee_Total": 14.0},
-
-    # ALB: קנייה 172 | מכירה 177.60 | כמות 26 | עמלה 14
     {"Symbol": "ALB", "Qty": 26, "Sell_Price": 177.60, "Buy_Price": 172.00, "Date": "29.01.2026", "Fee_Total": 14.0},
-
-    # SLI: קנייה 5.39 | מכירה 4.95 | כמות 530 | עמלה 14
     {"Symbol": "SLI", "Qty": 530, "Sell_Price": 4.95, "Buy_Price": 5.39, "Date": "29.01.2026", "Fee_Total": 14.0},
-
-    # --- היסטוריה קודמת ---
     {"Symbol": "VRT", "Qty": 8, "Sell_Price": 183.00, "Buy_Price": 163.00, "Date": "27.01.2026", "Fee_Total": 14.5},
     {"Symbol": "GEV", "Qty": 2, "Sell_Price": 654.21, "Buy_Price": 700.00, "Date": "24.01.2026", "Fee_Total": 14.5},
     {"Symbol": "PLTR", "Qty": 2, "Sell_Price": 174.00, "Buy_Price": 183.36, "Date": "15.01.2026", "Fee_Total": 14.5}, 
@@ -46,8 +55,11 @@ SOLD_HISTORY = [
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
-# תאריכי דוחות (לא רלוונטי כרגע כי התיק ריק, אבל נשמור למקרה שתקנה חזרה)
-EARNINGS_CALENDAR = {}
+# תאריכי דוחות משוערים
+EARNINGS_CALENDAR = {
+    "WFRD": "04/02/26", # משוער
+    "SMH": "N/A" # תעודת סל, אין דוחות
+}
 
 CURRENT_FEE = 7.0 
 
@@ -77,9 +89,8 @@ def get_financial_data():
         rate = 3.65
 
     symbols = [i['Symbol'] for i in CURRENT_PORTFOLIO]
-    # אם התיק ריק, מחזירים רק נתונים בסיסיים
     if not symbols: 
-        # מחשבים רק היסטוריה
+        # אם התיק ריק, מחזירים רק נתונים בסיסיים והיסטוריה
         total_realized_pl_net_usd = 0
         fees_paid_on_sold_total = 0
         for s in SOLD_HISTORY:
@@ -168,7 +179,7 @@ st.title("🚀 My Stocks Portfolio")
 if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
     st.rerun()
 
-with st.spinner("Talking to Wall St..."):
+with st.spinner("Connecting to Market..."):
     df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
 
 usd_cash = CASH_BALANCE["USD"]
@@ -205,7 +216,7 @@ with tab1:
     if not df_live.empty:
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
-        st.info("No active holdings. You are 100% Cash! 💵")
+        st.info("No active holdings.")
 
 with tab2:
     buy_rows = []
@@ -214,11 +225,10 @@ with tab2:
         cost_d = (p['Qty']*p['Buy_Price'])+fee
         buy_rows.append({"Symbol": p['Symbol'], "Date": p['Date'], "Qty": p['Qty'], 
                          "Price": f"${p['Buy_Price']:,.2f}", "Fee": fee, "Total Cost": f"${cost_d:,.2f}"})
-    # אם התיק ריק, מציגים הודעה
-    if not buy_rows:
-        st.caption("No open positions.")
-    else:
+    if buy_rows:
         st.dataframe(pd.DataFrame(buy_rows), use_container_width=True)
+    else:
+        st.caption("No open positions.")
 
 with tab3:
     st.subheader("💸 Realized P/L (Net)")
