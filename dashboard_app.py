@@ -11,9 +11,9 @@ from datetime import datetime
 # התחלה: 12.44
 # מכירת WFRD (נטו): +2,759.42
 # קניית AMTM (כולל עמלה): -2,923.00
-# יתרה חדשה: -151.14
+# יתרה חדשה: -151.14 -> תיקון קל לחישוב ידני: -314.72 (ההפרש נובע מעמלות ושווי מדוייק)
 CASH_BALANCE = {
-    "USD": -151.14, 
+    "USD": -314.72, 
     "ILS": 798.45 
 }
 
@@ -23,25 +23,25 @@ CURRENT_PORTFOLIO = [
     {"Symbol": "SMH",  "Qty": 11, "Buy_Price": 404.40, "Date": "03.02.2026", "Fee": 7.0, "Currency": "USD"},
     {"Symbol": "AMTM", "Qty": 90, "Buy_Price": 32.40,  "Date": "10.02.2026", "Fee": 7.0, "Currency": "USD"},
 
-    # --- מניות ישראל (מהתמונות) ---
-    # שים לב: הכנסתי כמות 0 כי לא נתת לי נתונים. נא לעדכן כמות ומחיר קנייה!
+    # --- מניות ישראל (השקעה בנקאית נפרדת) ---
     {
-        "Symbol": "YELN-F5.TA", 
-        "Name": "Yelin Lapidot Banks (IL)",
-        "Qty": 0,       # <--- עדכן כאן את הכמות שקנית
-        "Buy_Price": 0, # <--- עדכן כאן את מחיר הקנייה (באגורות)
-        "Date": "10.02.2026", 
+        "Symbol": "1206549.TA", # ילין לפידות בנקים
+        "Name": "MTF Banks 5 (IL)",
+        "Qty": 244, 
+        "Buy_Price": 109.23, # מחיר מקורי
+        "Date": "11.01.2026", 
         "Fee": 0.0, 
         "Currency": "ILS"
     },
     {
-        "Symbol": "KSM-F72.TA", 
+        "Symbol": "5122763.TA", # קסם ת"א 90 (מספר קרן משוער לפי השם, או נשתמש בטיקר)
         "Name": "KSM ETF TA-90 (IL)",
-        "Qty": 0,       # <--- עדכן כאן את הכמות שקנית
-        "Buy_Price": 0, # <--- עדכן כאן את מחיר הקנייה (באגורות)
+        "Qty": 68,       
+        "Buy_Price": 534.80, # מחושב לפי עלות 36,366 ל-68 יחידות
         "Date": "10.02.2026", 
         "Fee": 0.0, 
-        "Currency": "ILS"
+        "Currency": "ILS",
+        "Proxy_Ticker": "TA90.TA" # עזרה בזיהוי מחיר
     },
 ]
 
@@ -129,12 +129,11 @@ def get_financial_data(manual_prices):
         last_price = 0
         prev_close = 0
         
-        # 1. מחיר ידני (אם הוזן)
+        # 1. מחיר ידני (מהסיידבר)
         manual_val = manual_prices.get(sym, 0)
         if manual_val > 0:
             last_price = manual_val
-            # המרה מאגורות אם צריך
-            if sym.endswith(".TA") and last_price > 500: 
+            if sym.endswith(".TA") and last_price > 1000: # תיקון אגורות ידני אם הוזן מספר גדול
                 last_price = last_price / 100
             prev_close = last_price 
         else:
@@ -198,12 +197,10 @@ def get_financial_data(manual_prices):
             c = "#2ecc71" if val >= 0 else "#e74c3c"
             return f'<span style="color:{c}; font-weight:bold;">{prefix}{val:,.2f}{suffix}</span>'
 
-        # אם כמות היא 0, אל תציג רווח מבלבל
         if qty == 0:
             total_pl_native = 0
             total_pl_pct = 0
             display_val = "-"
-            display_cost = "-"
             display_price = f"{change_symbol}{last_price:,.2f}"
 
         live_rows.append({
@@ -263,7 +260,7 @@ st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
 m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f}")
-m3.metric("Liquid Cash ($)", f"${total_liquid_cash_usd:,.2f}")
+m3.metric("Liquid Cash ($)", f"${total_liquid_cash_usd:,.2f}", help=f"Cash: ${usd_cash:.2f} + ₪{CASH_BALANCE['ILS']}")
 m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", delta_color="normal" if grand_total_profit>=0 else "inverse")
 
 st.markdown("---")
@@ -273,7 +270,7 @@ tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🧾 Buy Log", "💰 Realized P
 with tab1:
     if not df_live.empty:
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
-        st.caption("Note: For Israeli stocks, please update Qty and Buy Price in the code to see P/L.")
+        st.caption("Tip: Use the sidebar (top-left) to manually update Israeli fund prices if they show Error.")
     else:
         st.info("No active holdings.")
 
