@@ -8,50 +8,47 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן
-# התחלה: 12.44
-# מכירת WFRD (נטו): +2,759.42
-# קניית AMTM (כולל עמלה): -2,923.00
-# יתרה חדשה: -151.14 -> תיקון קל לחישוב ידני: -314.72 (ההפרש נובע מעמלות ושווי מדוייק)
+# USD: נשאר מהפעילות ב-IBI (-314.72)
+# ILS: היה 798.45.
+#      נקנה קסם: (36366.18/100 * 68) + 75 עמלה = 24,804 ₪
+#      נקנה ילין: (10923.21/100 * 244) + 75 עמלה = 26,727 ₪
+#      סה"כ יציאה מהבנק: ~51,531 ₪
+#      יתרה שקלית חדשה (מינוס משקף את הכסף שהבאת מהבנק): -50,732.55
 CASH_BALANCE = {
     "USD": -314.72, 
-    "ILS": 798.45 
+    "ILS": -50732.55 
 }
 
 # 2. התיק הנוכחי
 CURRENT_PORTFOLIO = [
-    # --- מניות ארה"ב ---
+    # --- מניות ארה"ב (IBI) ---
     {"Symbol": "SMH",  "Qty": 11, "Buy_Price": 404.40, "Date": "03.02.2026", "Fee": 7.0, "Currency": "USD"},
     {"Symbol": "AMTM", "Qty": 90, "Buy_Price": 32.40,  "Date": "10.02.2026", "Fee": 7.0, "Currency": "USD"},
 
-    # --- מניות ישראל (השקעה בנקאית נפרדת) ---
+    # --- מניות ישראל (בנק) ---
     {
-        "Symbol": "1206549.TA", # ילין לפידות בנקים
-        "Name": "MTF Banks 5 (IL)",
+        "Symbol": "YELN-F5.TA", 
+        "Name": "Yelin Lapidot Banks",
         "Qty": 244, 
-        "Buy_Price": 109.23, # מחיר מקורי
-        "Date": "11.01.2026", 
-        "Fee": 0.0, 
+        "Buy_Price": 10923.21, # מחיר באגורות (כפי שמופיע בבנק)
+        "Date": "09.01.2026", 
+        "Fee_ILS": 75.0, # עמלה בשקלים
         "Currency": "ILS"
     },
     {
-        "Symbol": "5122763.TA", # קסם ת"א 90 (מספר קרן משוער לפי השם, או נשתמש בטיקר)
-        "Name": "KSM ETF TA-90 (IL)",
+        "Symbol": "KSM-F72.TA", 
+        "Name": "KSM ETF TA-90",
         "Qty": 68,       
-        "Buy_Price": 534.80, # מחושב לפי עלות 36,366 ל-68 יחידות
-        "Date": "10.02.2026", 
-        "Fee": 0.0, 
-        "Currency": "ILS",
-        "Proxy_Ticker": "TA90.TA" # עזרה בזיהוי מחיר
+        "Buy_Price": 36366.18, # מחיר באגורות (כפי שמופיע בבנק)
+        "Date": "19.01.2026", 
+        "Fee_ILS": 75.0, # עמלה בשקלים
+        "Currency": "ILS"
     },
 ]
 
 # 3. היסטוריית מכירות
 SOLD_HISTORY = [
-    # מכירה חדשה (10.02.2026)
-    # WFRD: קנייה 93.95 | מכירה 102.46 | כמות 27 | עמלה 14 (7+7)
     {"Symbol": "WFRD", "Qty": 27, "Sell_Price": 102.46, "Buy_Price": 93.95, "Date": "10.02.2026", "Fee_Total": 14.0},
-
-    # מכירות קודמות
     {"Symbol": "KLAC", "Qty": 2, "Sell_Price": 1407.74, "Buy_Price": 1433.00, "Date": "01.02.2026", "Fee_Total": 14.0},
     {"Symbol": "DIS", "Qty": 40, "Sell_Price": 107.52, "Buy_Price": 105.00, "Date": "01.02.2026", "Fee_Total": 14.0},
     {"Symbol": "BARK", "Qty": 2500, "Sell_Price": 0.8501, "Buy_Price": 0.89, "Date": "01.02.2026", "Fee_Total": 14.0},
@@ -119,6 +116,10 @@ def get_financial_data(manual_prices):
     total_unrealized_pl_usd = 0
     fees_paid_on_open_holdings = sum([item.get('Fee', 0) for item in CURRENT_PORTFOLIO])
 
+    # הוספת עמלות שקליות לחישוב הכללי
+    fees_ils_total = sum([item.get('Fee_ILS', 0) for item in CURRENT_PORTFOLIO])
+    fees_paid_on_open_holdings += (fees_ils_total / rate)
+
     for item in CURRENT_PORTFOLIO:
         sym = item['Symbol']
         qty = item['Qty']
@@ -129,12 +130,12 @@ def get_financial_data(manual_prices):
         last_price = 0
         prev_close = 0
         
-        # 1. מחיר ידני (מהסיידבר)
+        # 1. מחיר ידני
         manual_val = manual_prices.get(sym, 0)
         if manual_val > 0:
             last_price = manual_val
-            if sym.endswith(".TA") and last_price > 1000: # תיקון אגורות ידני אם הוזן מספר גדול
-                last_price = last_price / 100
+            # עבור ידני, אם המשתמש מזין בשקלים למניה ישראלית, נמיר לאגורות לצורך החישוב או להפך
+            # ההנחה: המשתמש מזין מחיר כפי שהוא רואה בבורסה (אגורות לת"א)
             prev_close = last_price 
         else:
             # 2. משיכה מיאהו
@@ -142,30 +143,42 @@ def get_financial_data(manual_prices):
                 t = tickers.tickers[sym]
                 last_price = t.fast_info.last_price
                 prev_close = t.fast_info.previous_close
-                
-                # תיקון אגורות לישראל
-                if sym.endswith(".TA"):
-                    last_price = last_price / 100
-                    prev_close = prev_close / 100
             except:
                 pass
 
         if not last_price or last_price == 0:
-            last_price = buy_price if buy_price > 0 else 0
-            prev_close = last_price
+            last_price = buy_price # Fallback
+            prev_close = buy_price
 
         # --- חישובים ---
         if currency == "ILS":
-            price_in_usd = last_price / rate
-            cost_basis_usd = (buy_price / rate) * qty
-            market_val_usd = price_in_usd * qty
+            # נתונים מת"א מגיעים באגורות (לרוב)
+            # אם המחיר גדול מאוד (מעל 100), נניח שזה אגורות ונחלק ב-100 להצגה בשקלים
             
-            display_price = f"₪{last_price:,.2f}"
-            display_cost = f"₪{buy_price:,.2f}"
-            display_val = f"₪{last_price * qty:,.2f}"
+            # מחיר נוכחי בשקלים
+            price_ils = last_price / 100
+            # מחיר קנייה בשקלים (כי הזנו אגורות בקוד)
+            buy_price_ils = buy_price / 100
+            
+            # המרה לדולר לטובת הטוטאל
+            market_val_usd = (price_ils * qty) / rate
+            cost_basis_usd = (buy_price_ils * qty) / rate
+            
+            # מחרוזות לתצוגה
+            display_price = f"₪{price_ils:,.2f}"
+            display_cost = f"₪{buy_price_ils:,.2f}"
+            display_val = f"₪{price_ils * qty:,.2f}"
             change_symbol = "₪"
-            total_pl_native = (last_price - buy_price) * qty
-        else:
+            
+            # רווח/הפסד בשקלים
+            total_pl_native = (price_ils - buy_price_ils) * qty
+            day_change = (price_ils - (prev_close/100)) * qty
+            
+            # חישוב אחוזים
+            total_pl_pct = ((price_ils - buy_price_ils) / buy_price_ils) * 100
+            day_pct = ((price_ils - (prev_close/100)) / (prev_close/100)) * 100 if prev_close > 0 else 0
+
+        else: # USD
             cost_basis_usd = buy_price * qty
             market_val_usd = last_price * qty
             
@@ -173,14 +186,13 @@ def get_financial_data(manual_prices):
             display_cost = f"${buy_price:,.2f}"
             display_val = f"${market_val_usd:,.2f}"
             change_symbol = "$"
+            
             total_pl_native = (last_price - buy_price) * qty
-
-        day_change = (last_price - prev_close) * qty
-        day_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
-        
-        total_pl_pct = 0
-        if buy_price > 0:
+            day_change = (last_price - prev_close) * qty
+            
             total_pl_pct = ((last_price - buy_price) / buy_price) * 100
+            day_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
+
         
         portfolio_market_value_usd += market_val_usd
         total_unrealized_pl_usd += (market_val_usd - cost_basis_usd)
@@ -196,12 +208,6 @@ def get_financial_data(manual_prices):
         def color_val(val, suffix="", prefix=""):
             c = "#2ecc71" if val >= 0 else "#e74c3c"
             return f'<span style="color:{c}; font-weight:bold;">{prefix}{val:,.2f}{suffix}</span>'
-
-        if qty == 0:
-            total_pl_native = 0
-            total_pl_pct = 0
-            display_val = "-"
-            display_price = f"{change_symbol}{last_price:,.2f}"
 
         live_rows.append({
             "Symbol": display_name,
@@ -239,7 +245,7 @@ for p in CURRENT_PORTFOLIO:
     if p.get("Currency") == "ILS":
         sym = p['Symbol']
         name = p.get("Name", sym)
-        val = st.sidebar.number_input(f"{name} (₪/Agorot)", min_value=0.0, value=0.0, step=0.1)
+        val = st.sidebar.number_input(f"{name} (Agorot)", min_value=0.0, value=0.0, step=0.1)
         manual_prices[sym] = val
 
 if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
@@ -248,11 +254,11 @@ if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
 with st.spinner("Fetching Global Data..."):
     df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data(manual_prices)
 
-usd_cash = CASH_BALANCE["USD"]
-ils_cash_usd = CASH_BALANCE["ILS"] / rate
-total_liquid_cash_usd = usd_cash + ils_cash_usd
-
-total_net_worth_usd = port_val + total_liquid_cash_usd
+# חישוב שווי נקי כולל (כולל הנכסים בבנק)
+# שווי המזומן הדולרי + שווי התיק הכולל (דולרי + שקלי מומר) + מזומן שקלי (אם היה חיובי)
+# במקרה שלנו המזומן השקלי שלילי כי הוא מייצג את הכסף שיצא מהבנק, אז לא מחסירים אותו מהשווי הנקי של התיק
+# השווי הנקי הוא: המזומן הדולרי שיש + שווי המניות הנוכחי
+total_net_worth_usd = port_val + CASH_BALANCE["USD"]
 total_net_worth_ils = total_net_worth_usd * rate
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
 
@@ -260,7 +266,7 @@ st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
 m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f}")
-m3.metric("Liquid Cash ($)", f"${total_liquid_cash_usd:,.2f}", help=f"Cash: ${usd_cash:.2f} + ₪{CASH_BALANCE['ILS']}")
+m3.metric("Liquid Cash ($)", f"${CASH_BALANCE['USD']:,.2f}") # מציג רק את הדולרי הזמין ב-IBI
 m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", delta_color="normal" if grand_total_profit>=0 else "inverse")
 
 st.markdown("---")
@@ -270,7 +276,6 @@ tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🧾 Buy Log", "💰 Realized P
 with tab1:
     if not df_live.empty:
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
-        st.caption("Tip: Use the sidebar (top-left) to manually update Israeli fund prices if they show Error.")
     else:
         st.info("No active holdings.")
 
@@ -280,8 +285,15 @@ with tab2:
         fee = p.get('Fee', 0)
         curr = p.get("Currency", "USD")
         sym = p.get("Name", p['Symbol'].replace(".TA", " (IL)"))
-        price_d = f"₪{p['Buy_Price']:,.2f}" if curr == "ILS" else f"${p['Buy_Price']:,.2f}"
-        cost_d = f"₪{(p['Qty']*p['Buy_Price'])+fee:,.2f}" if curr == "ILS" else f"${(p['Qty']*p['Buy_Price'])+fee:,.2f}"
+        
+        if curr == "ILS":
+            fee = p.get('Fee_ILS', 0)
+            price_d = f"₪{p['Buy_Price']/100:,.2f}" # הצגה בשקלים
+            cost_d = f"₪{((p['Qty']*p['Buy_Price'])/100)+fee:,.2f}"
+        else:
+            price_d = f"${p['Buy_Price']:,.2f}"
+            cost_d = f"${(p['Qty']*p['Buy_Price'])+fee:,.2f}"
+            
         buy_rows.append({"Symbol": sym, "Date": p['Date'], "Qty": p['Qty'], "Price": price_d, "Fee": fee, "Total Cost": cost_d})
     st.dataframe(pd.DataFrame(buy_rows), use_container_width=True)
 
