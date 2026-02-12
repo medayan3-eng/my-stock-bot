@@ -8,14 +8,13 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן
-# חישוב:
-# התחלה: -314.72
-# מכירת AMTM (נטו): +2,822.60
-# קניית PESI (כולל עמלה): -3,239.94
-# יתרה חדשה: -732.06
+# חישוב מעודכן:
+# יתרה קודמת: -732.06$
+# הפקדה היום: 1,300 ש"ח (הומר לדולר לכיסוי המינוס, בערך +361.11$)
+# יתרה חדשה: -370.95$
 CASH_BALANCE = {
-    "USD": -732.06, 
-    "ILS": -50732.55 
+    "USD": -370.95, 
+    "ILS": -50732.55 # היתרה השקלית החיצונית נשארת ללא שינוי (ההשקעה בבנק)
 }
 
 # 2. התיק הנוכחי
@@ -47,8 +46,7 @@ CURRENT_PORTFOLIO = [
 
 # 3. היסטוריית מכירות
 SOLD_HISTORY = [
-    # --- מכירות חדשות (12.02.2026) ---
-    # AMTM: קנייה 32.40 | מכירה 31.44 | כמות 90 | עמלה 14 (7+7)
+    # --- מכירות 12.02.2026 ---
     {"Symbol": "AMTM", "Qty": 90, "Sell_Price": 31.44, "Buy_Price": 32.40, "Date": "12.02.2026", "Fee_Total": 14.0},
 
     # --- מכירות קודמות ---
@@ -138,9 +136,14 @@ def get_financial_data(manual_prices):
         manual_val = manual_prices.get(sym, 0)
         if manual_val > 0:
             last_price = manual_val
-            # המרה מאגורות אם צריך
-            if sym.endswith(".TA") and last_price > 500: 
-                last_price = last_price / 100
+            # עבור ידני, אם המשתמש מזין בשקלים למניה ישראלית, נמיר לאגורות
+            if sym.endswith(".TA") and last_price < 5000: 
+                 # המשתמש כנראה הזין שקלים (למשל 117), נשאיר את זה ככה ונשתמש בזה
+                 pass
+            elif sym.endswith(".TA") and last_price > 5000:
+                 # המשתמש הזין אגורות, נחלק
+                 last_price = last_price / 100
+            
             prev_close = last_price 
         else:
             # 2. משיכה מיאהו
@@ -157,14 +160,16 @@ def get_financial_data(manual_prices):
                 pass
 
         if not last_price or last_price == 0:
-            last_price = buy_price # Fallback
-            prev_close = buy_price
+            last_price = buy_price / 100 if currency == "ILS" else buy_price
+            prev_close = last_price
 
         # --- חישובים ---
         if currency == "ILS":
-            # נתונים מת"א מגיעים באגורות (לרוב)
-            price_ils = last_price / 100
+            # טיפול במחיר קנייה (שהוא באגורות בקוד)
             buy_price_ils = buy_price / 100
+            
+            # אם המחיר הנוכחי מגיע מאגורות הוא כבר חולק למעלה, אם משתמש הזין ידני בשקלים הוא תקין
+            price_ils = last_price 
             
             # המרה לדולר לטובת הטוטאל
             market_val_usd = (price_ils * qty) / rate
@@ -178,11 +183,11 @@ def get_financial_data(manual_prices):
             
             # רווח/הפסד בשקלים
             total_pl_native = (price_ils - buy_price_ils) * qty
-            day_change = (price_ils - (prev_close/100)) * qty
+            day_change = (price_ils - prev_close) * qty # כאן prev_close כבר בשקלים
             
             # חישוב אחוזים
             total_pl_pct = ((price_ils - buy_price_ils) / buy_price_ils) * 100
-            day_pct = ((price_ils - (prev_close/100)) / (prev_close/100)) * 100 if prev_close > 0 else 0
+            day_pct = ((price_ils - prev_close) / prev_close) * 100 if prev_close > 0 else 0
 
         else: # USD
             cost_basis_usd = buy_price * qty
@@ -251,7 +256,7 @@ for p in CURRENT_PORTFOLIO:
     if p.get("Currency") == "ILS":
         sym = p['Symbol']
         name = p.get("Name", sym)
-        val = st.sidebar.number_input(f"{name} (Agorot)", min_value=0.0, value=0.0, step=0.1)
+        val = st.sidebar.number_input(f"{name} (₪)", min_value=0.0, value=0.0, step=0.1)
         manual_prices[sym] = val
 
 if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
