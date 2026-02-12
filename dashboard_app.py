@@ -8,13 +8,13 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן
-# חישוב מעודכן:
+# חישוב:
 # יתרה קודמת: -732.06$
-# הפקדה היום: 1,300 ש"ח (הומר לדולר לכיסוי המינוס, בערך +361.11$)
-# יתרה חדשה: -370.95$
+# הפקדה היום: 1,300 ש"ח (~363$)
+# יתרה חדשה: -369.00$ (המינוס הצטמצם אך עדיין קיים כי הכסף מושקע במניות)
 CASH_BALANCE = {
-    "USD": -370.95, 
-    "ILS": -50732.55 # היתרה השקלית החיצונית נשארת ללא שינוי (ההשקעה בבנק)
+    "USD": -369.00, 
+    "ILS": -50732.55 
 }
 
 # 2. התיק הנוכחי
@@ -136,14 +136,8 @@ def get_financial_data(manual_prices):
         manual_val = manual_prices.get(sym, 0)
         if manual_val > 0:
             last_price = manual_val
-            # עבור ידני, אם המשתמש מזין בשקלים למניה ישראלית, נמיר לאגורות
-            if sym.endswith(".TA") and last_price < 5000: 
-                 # המשתמש כנראה הזין שקלים (למשל 117), נשאיר את זה ככה ונשתמש בזה
-                 pass
-            elif sym.endswith(".TA") and last_price > 5000:
-                 # המשתמש הזין אגורות, נחלק
-                 last_price = last_price / 100
-            
+            if sym.endswith(".TA") and last_price > 500: 
+                last_price = last_price / 100
             prev_close = last_price 
         else:
             # 2. משיכה מיאהו
@@ -151,8 +145,6 @@ def get_financial_data(manual_prices):
                 t = tickers.tickers[sym]
                 last_price = t.fast_info.last_price
                 prev_close = t.fast_info.previous_close
-                
-                # תיקון אגורות לישראל
                 if sym.endswith(".TA"):
                     last_price = last_price / 100
                     prev_close = prev_close / 100
@@ -160,32 +152,26 @@ def get_financial_data(manual_prices):
                 pass
 
         if not last_price or last_price == 0:
-            last_price = buy_price / 100 if currency == "ILS" else buy_price
-            prev_close = last_price
+            last_price = buy_price # Fallback
+            prev_close = buy_price
 
         # --- חישובים ---
         if currency == "ILS":
+            price_ils = last_price # כבר טופל למעלה אם זה אגורות
             # טיפול במחיר קנייה (שהוא באגורות בקוד)
             buy_price_ils = buy_price / 100
             
-            # אם המחיר הנוכחי מגיע מאגורות הוא כבר חולק למעלה, אם משתמש הזין ידני בשקלים הוא תקין
-            price_ils = last_price 
-            
-            # המרה לדולר לטובת הטוטאל
             market_val_usd = (price_ils * qty) / rate
             cost_basis_usd = (buy_price_ils * qty) / rate
             
-            # מחרוזות לתצוגה
             display_price = f"₪{price_ils:,.2f}"
             display_cost = f"₪{buy_price_ils:,.2f}"
             display_val = f"₪{price_ils * qty:,.2f}"
             change_symbol = "₪"
             
-            # רווח/הפסד בשקלים
             total_pl_native = (price_ils - buy_price_ils) * qty
-            day_change = (price_ils - prev_close) * qty # כאן prev_close כבר בשקלים
+            day_change = (price_ils - prev_close) * qty
             
-            # חישוב אחוזים
             total_pl_pct = ((price_ils - buy_price_ils) / buy_price_ils) * 100
             day_pct = ((price_ils - prev_close) / prev_close) * 100 if prev_close > 0 else 0
 
@@ -270,11 +256,18 @@ total_net_worth_usd = port_val + CASH_BALANCE["USD"]
 total_net_worth_ils = total_net_worth_usd * rate
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
 
+# חישוב אחוז תשואה (ROI)
+invested_capital = total_net_worth_usd - grand_total_profit
+portfolio_return_pct = (grand_total_profit / invested_capital) * 100 if invested_capital > 0 else 0
+
 st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
-m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f}")
-m3.metric("Liquid Cash ($)", f"${CASH_BALANCE['USD']:,.2f}") 
+# תיקון: הצגת אחוז תשואה במקום שער דולר
+color_roi = "normal" if portfolio_return_pct >= 0 else "inverse"
+m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"ROI: {portfolio_return_pct:.2f}%", delta_color=color_roi)
+
+m3.metric("Liquid Cash ($)", f"${CASH_BALANCE['USD']:,.2f}", help="Cash available (Negative means margin used)")
 m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", delta_color="normal" if grand_total_profit>=0 else "inverse")
 
 st.markdown("---")
@@ -296,7 +289,7 @@ with tab2:
         
         if curr == "ILS":
             fee = p.get('Fee_ILS', 0)
-            price_d = f"₪{p['Buy_Price']/100:,.2f}" # הצגה בשקלים
+            price_d = f"₪{p['Buy_Price']/100:,.2f}"
             cost_d = f"₪{((p['Qty']*p['Buy_Price'])/100)+fee:,.2f}"
         else:
             price_d = f"${p['Buy_Price']:,.2f}"
@@ -319,3 +312,13 @@ with tab3:
             "Net Profit ($)": f'<span style="color:{c}; font-weight:bold;">${net:,.2f}</span>'
         })
     st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
+    
+    # סיכום רווח ממומש בתחתית
+    total_realized_color = "green" if realized_pl_net >= 0 else "red"
+    st.markdown(f"""
+    <div style="text-align: center; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background-color: #f0f2f6; margin-top: 20px;">
+        <h3 style="margin:0;">Total Realized Profit (Closed Positions)</h3>
+        <h1 style="color: {total_realized_color}; margin:0;">${realized_pl_net:,.2f}</h1>
+        <small>After all fees (No Tax)</small>
+    </div>
+    """, unsafe_allow_html=True)
