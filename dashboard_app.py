@@ -8,14 +8,13 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן
-# USD: נשאר מהפעילות ב-IBI (-314.72)
-# ILS: היה 798.45.
-#      נקנה קסם: (36366.18/100 * 68) + 75 עמלה = 24,804 ₪
-#      נקנה ילין: (10923.21/100 * 244) + 75 עמלה = 26,727 ₪
-#      סה"כ יציאה מהבנק: ~51,531 ₪
-#      יתרה שקלית חדשה (מינוס משקף את הכסף שהבאת מהבנק): -50,732.55
+# חישוב:
+# התחלה: -314.72
+# מכירת AMTM (נטו): +2,822.60
+# קניית PESI (כולל עמלה): -3,239.94
+# יתרה חדשה: -732.06
 CASH_BALANCE = {
-    "USD": -314.72, 
+    "USD": -732.06, 
     "ILS": -50732.55 
 }
 
@@ -23,31 +22,36 @@ CASH_BALANCE = {
 CURRENT_PORTFOLIO = [
     # --- מניות ארה"ב (IBI) ---
     {"Symbol": "SMH",  "Qty": 11, "Buy_Price": 404.40, "Date": "03.02.2026", "Fee": 7.0, "Currency": "USD"},
-    {"Symbol": "AMTM", "Qty": 90, "Buy_Price": 32.40,  "Date": "10.02.2026", "Fee": 7.0, "Currency": "USD"},
+    {"Symbol": "PESI", "Qty": 218, "Buy_Price": 14.83, "Date": "12.02.2026", "Fee": 7.0, "Currency": "USD"},
 
     # --- מניות ישראל (בנק) ---
     {
         "Symbol": "YELN-F5.TA", 
         "Name": "Yelin Lapidot Banks",
         "Qty": 244, 
-        "Buy_Price": 10923.21, # מחיר באגורות (כפי שמופיע בבנק)
+        "Buy_Price": 10923.21, # אגורות
         "Date": "09.01.2026", 
-        "Fee_ILS": 75.0, # עמלה בשקלים
+        "Fee_ILS": 75.0, 
         "Currency": "ILS"
     },
     {
         "Symbol": "KSM-F72.TA", 
         "Name": "KSM ETF TA-90",
         "Qty": 68,       
-        "Buy_Price": 36366.18, # מחיר באגורות (כפי שמופיע בבנק)
+        "Buy_Price": 36366.18, # אגורות
         "Date": "19.01.2026", 
-        "Fee_ILS": 75.0, # עמלה בשקלים
+        "Fee_ILS": 75.0, 
         "Currency": "ILS"
     },
 ]
 
 # 3. היסטוריית מכירות
 SOLD_HISTORY = [
+    # --- מכירות חדשות (12.02.2026) ---
+    # AMTM: קנייה 32.40 | מכירה 31.44 | כמות 90 | עמלה 14 (7+7)
+    {"Symbol": "AMTM", "Qty": 90, "Sell_Price": 31.44, "Buy_Price": 32.40, "Date": "12.02.2026", "Fee_Total": 14.0},
+
+    # --- מכירות קודמות ---
     {"Symbol": "WFRD", "Qty": 27, "Sell_Price": 102.46, "Buy_Price": 93.95, "Date": "10.02.2026", "Fee_Total": 14.0},
     {"Symbol": "KLAC", "Qty": 2, "Sell_Price": 1407.74, "Buy_Price": 1433.00, "Date": "01.02.2026", "Fee_Total": 14.0},
     {"Symbol": "DIS", "Qty": 40, "Sell_Price": 107.52, "Buy_Price": 105.00, "Date": "01.02.2026", "Fee_Total": 14.0},
@@ -68,7 +72,7 @@ SOLD_HISTORY = [
 ]
 
 EARNINGS_CALENDAR = {
-    "SMH": "N/A", "AMTM": "TBD"
+    "SMH": "N/A", "PESI": "TBD"
 }
 
 CURRENT_FEE = 7.0 
@@ -134,8 +138,9 @@ def get_financial_data(manual_prices):
         manual_val = manual_prices.get(sym, 0)
         if manual_val > 0:
             last_price = manual_val
-            # עבור ידני, אם המשתמש מזין בשקלים למניה ישראלית, נמיר לאגורות לצורך החישוב או להפך
-            # ההנחה: המשתמש מזין מחיר כפי שהוא רואה בבורסה (אגורות לת"א)
+            # המרה מאגורות אם צריך
+            if sym.endswith(".TA") and last_price > 500: 
+                last_price = last_price / 100
             prev_close = last_price 
         else:
             # 2. משיכה מיאהו
@@ -143,6 +148,11 @@ def get_financial_data(manual_prices):
                 t = tickers.tickers[sym]
                 last_price = t.fast_info.last_price
                 prev_close = t.fast_info.previous_close
+                
+                # תיקון אגורות לישראל
+                if sym.endswith(".TA"):
+                    last_price = last_price / 100
+                    prev_close = prev_close / 100
             except:
                 pass
 
@@ -153,11 +163,7 @@ def get_financial_data(manual_prices):
         # --- חישובים ---
         if currency == "ILS":
             # נתונים מת"א מגיעים באגורות (לרוב)
-            # אם המחיר גדול מאוד (מעל 100), נניח שזה אגורות ונחלק ב-100 להצגה בשקלים
-            
-            # מחיר נוכחי בשקלים
             price_ils = last_price / 100
-            # מחיר קנייה בשקלים (כי הזנו אגורות בקוד)
             buy_price_ils = buy_price / 100
             
             # המרה לדולר לטובת הטוטאל
@@ -254,10 +260,7 @@ if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
 with st.spinner("Fetching Global Data..."):
     df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data(manual_prices)
 
-# חישוב שווי נקי כולל (כולל הנכסים בבנק)
-# שווי המזומן הדולרי + שווי התיק הכולל (דולרי + שקלי מומר) + מזומן שקלי (אם היה חיובי)
-# במקרה שלנו המזומן השקלי שלילי כי הוא מייצג את הכסף שיצא מהבנק, אז לא מחסירים אותו מהשווי הנקי של התיק
-# השווי הנקי הוא: המזומן הדולרי שיש + שווי המניות הנוכחי
+# חישוב שווי נקי כולל
 total_net_worth_usd = port_val + CASH_BALANCE["USD"]
 total_net_worth_ils = total_net_worth_usd * rate
 grand_total_profit = unrealized_pl + realized_pl_net - fees_open
@@ -266,7 +269,7 @@ st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
 m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"Rate: {rate:.2f}")
-m3.metric("Liquid Cash ($)", f"${CASH_BALANCE['USD']:,.2f}") # מציג רק את הדולרי הזמין ב-IBI
+m3.metric("Liquid Cash ($)", f"${CASH_BALANCE['USD']:,.2f}") 
 m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", delta_color="normal" if grand_total_profit>=0 else "inverse")
 
 st.markdown("---")
