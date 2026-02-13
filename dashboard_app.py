@@ -9,20 +9,19 @@ from datetime import datetime
 
 # 1. יתרות מזומן
 # חישוב:
-# יתרה קודמת: -732.06$
-# הפקדה היום: 1,300 ש"ח (~363$)
-# יתרה חדשה: -369.00$ (המינוס הצטמצם אך עדיין קיים כי הכסף מושקע במניות)
+# התחלה: -369.00$
+# מכירת PESI (נטו): +3,219.40$
+# מכירת SMH (נטו): +4,481.00$
+# יתרה חדשה: 7,331.40$
 CASH_BALANCE = {
-    "USD": -369.00, 
+    "USD": 7331.40, 
     "ILS": -50732.55 
 }
 
 # 2. התיק הנוכחי
 CURRENT_PORTFOLIO = [
-    # --- מניות ארה"ב (IBI) ---
-    {"Symbol": "SMH",  "Qty": 11, "Buy_Price": 404.40, "Date": "03.02.2026", "Fee": 7.0, "Currency": "USD"},
-    {"Symbol": "PESI", "Qty": 218, "Buy_Price": 14.83, "Date": "12.02.2026", "Fee": 7.0, "Currency": "USD"},
-
+    # --- מניות ארה"ב (ריק כרגע) ---
+    
     # --- מניות ישראל (בנק) ---
     {
         "Symbol": "YELN-F5.TA", 
@@ -46,10 +45,15 @@ CURRENT_PORTFOLIO = [
 
 # 3. היסטוריית מכירות
 SOLD_HISTORY = [
-    # --- מכירות 12.02.2026 ---
-    {"Symbol": "AMTM", "Qty": 90, "Sell_Price": 31.44, "Buy_Price": 32.40, "Date": "12.02.2026", "Fee_Total": 14.0},
+    # --- מכירות חדשות (13.02.2026 לצורך העניין) ---
+    # PESI: קנייה 14.83 | מכירה 14.80 | כמות 218 | עמלה 14
+    {"Symbol": "PESI", "Qty": 218, "Sell_Price": 14.80, "Buy_Price": 14.83, "Date": "13.02.2026", "Fee_Total": 14.0},
+    
+    # SMH: קנייה 404.40 | מכירה 408.00 | כמות 11 | עמלה 14
+    {"Symbol": "SMH", "Qty": 11, "Sell_Price": 408.00, "Buy_Price": 404.40, "Date": "13.02.2026", "Fee_Total": 14.0},
 
     # --- מכירות קודמות ---
+    {"Symbol": "AMTM", "Qty": 90, "Sell_Price": 31.44, "Buy_Price": 32.40, "Date": "12.02.2026", "Fee_Total": 14.0},
     {"Symbol": "WFRD", "Qty": 27, "Sell_Price": 102.46, "Buy_Price": 93.95, "Date": "10.02.2026", "Fee_Total": 14.0},
     {"Symbol": "KLAC", "Qty": 2, "Sell_Price": 1407.74, "Buy_Price": 1433.00, "Date": "01.02.2026", "Fee_Total": 14.0},
     {"Symbol": "DIS", "Qty": 40, "Sell_Price": 107.52, "Buy_Price": 105.00, "Date": "01.02.2026", "Fee_Total": 14.0},
@@ -69,9 +73,7 @@ SOLD_HISTORY = [
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
-EARNINGS_CALENDAR = {
-    "SMH": "N/A", "PESI": "TBD"
-}
+EARNINGS_CALENDAR = {}
 
 CURRENT_FEE = 7.0 
 
@@ -157,8 +159,7 @@ def get_financial_data(manual_prices):
 
         # --- חישובים ---
         if currency == "ILS":
-            price_ils = last_price # כבר טופל למעלה אם זה אגורות
-            # טיפול במחיר קנייה (שהוא באגורות בקוד)
+            price_ils = last_price
             buy_price_ils = buy_price / 100
             
             market_val_usd = (price_ils * qty) / rate
@@ -263,7 +264,6 @@ portfolio_return_pct = (grand_total_profit / invested_capital) * 100 if invested
 st.markdown("### 🏦 Account Snapshot")
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
-# תיקון: הצגת אחוז תשואה במקום שער דולר
 color_roi = "normal" if portfolio_return_pct >= 0 else "inverse"
 m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"ROI: {portfolio_return_pct:.2f}%", delta_color=color_roi)
 
@@ -278,7 +278,7 @@ with tab1:
     if not df_live.empty:
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
-        st.info("No active holdings.")
+        st.info("No active holdings (in USD).")
 
 with tab2:
     buy_rows = []
@@ -313,7 +313,6 @@ with tab3:
         })
     st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
     
-    # סיכום רווח ממומש בתחתית
     total_realized_color = "green" if realized_pl_net >= 0 else "red"
     st.markdown(f"""
     <div style="text-align: center; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background-color: #f0f2f6; margin-top: 20px;">
