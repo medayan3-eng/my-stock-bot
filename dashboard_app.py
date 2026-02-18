@@ -8,20 +8,24 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן
-# חישוב:
-# התחלה: -369.00$
-# מכירת PESI (נטו): +3,219.40$
-# מכירת SMH (נטו): +4,481.00$
-# יתרה חדשה: 7,331.40$
+# חישוב מעודכן:
+# יתרה קודמת: 7,331.40$
+# קניית GLW (כולל עמלה): -2,908.80
+# קניית LOW (כולל עמלה): -2,236.52
+# קניית VIAV (כולל עמלה): -2,588.32
+# יתרה חדשה: -402.24$
 CASH_BALANCE = {
-    "USD": 7331.40, 
+    "USD": -402.24, 
     "ILS": -50732.55 
 }
 
 # 2. התיק הנוכחי
 CURRENT_PORTFOLIO = [
-    # --- מניות ארה"ב (ריק כרגע) ---
-    
+    # --- מניות ארה"ב (חדשות מאתמול - 17.02.2026) ---
+    {"Symbol": "GLW",  "Qty": 22, "Buy_Price": 131.90, "Date": "17.02.2026", "Fee": 7.0, "Currency": "USD"},
+    {"Symbol": "LOW",  "Qty": 8,  "Buy_Price": 278.69, "Date": "17.02.2026", "Fee": 7.0, "Currency": "USD"},
+    {"Symbol": "VIAV", "Qty": 98, "Buy_Price": 26.34,  "Date": "17.02.2026", "Fee": 7.0, "Currency": "USD"},
+
     # --- מניות ישראל (בנק) ---
     {
         "Symbol": "YELN-F5.TA", 
@@ -45,11 +49,8 @@ CURRENT_PORTFOLIO = [
 
 # 3. היסטוריית מכירות
 SOLD_HISTORY = [
-    # --- מכירות חדשות (13.02.2026 לצורך העניין) ---
-    # PESI: קנייה 14.83 | מכירה 14.80 | כמות 218 | עמלה 14
+    # --- מכירות 13.02.2026 ---
     {"Symbol": "PESI", "Qty": 218, "Sell_Price": 14.80, "Buy_Price": 14.83, "Date": "13.02.2026", "Fee_Total": 14.0},
-    
-    # SMH: קנייה 404.40 | מכירה 408.00 | כמות 11 | עמלה 14
     {"Symbol": "SMH", "Qty": 11, "Sell_Price": 408.00, "Buy_Price": 404.40, "Date": "13.02.2026", "Fee_Total": 14.0},
 
     # --- מכירות קודמות ---
@@ -73,7 +74,9 @@ SOLD_HISTORY = [
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
-EARNINGS_CALENDAR = {}
+EARNINGS_CALENDAR = {
+    "GLW": "28/04/26", "LOW": "25/02/26", "VIAV": "05/05/26"
+}
 
 CURRENT_FEE = 7.0 
 
@@ -278,7 +281,7 @@ with tab1:
     if not df_live.empty:
         st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
-        st.info("No active holdings (in USD).")
+        st.info("No active holdings.")
 
 with tab2:
     buy_rows = []
@@ -313,6 +316,7 @@ with tab3:
         })
     st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
     
+    # סיכום רווח ממומש בתחתית
     total_realized_color = "green" if realized_pl_net >= 0 else "red"
     st.markdown(f"""
     <div style="text-align: center; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background-color: #f0f2f6; margin-top: 20px;">
