@@ -8,7 +8,6 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן (IBI בלבד)
-# מינוס של 402.24$ נוצר לאחר קניית GLW, LOW, VIAV
 CASH_BALANCE = {
     "USD": -402.24, 
     "ILS": 0.0 
@@ -105,7 +104,14 @@ def get_financial_data():
         try:
             t = tickers.tickers[sym]
             last_price = t.fast_info.last_price
-            prev_close = t.fast_info.previous_close
+            
+            # ניסיון למשוך נתון יציב יותר לסגירה הקודמת כדי לתקן פערים באחוזים
+            hist = t.history(period="5d")
+            if not hist.empty and len(hist) >= 2:
+                # לוקח את הסגירה של היום הקודם
+                prev_close = hist['Close'].iloc[-2]
+            else:
+                prev_close = t.fast_info.previous_close
         except:
             pass
 
@@ -122,7 +128,9 @@ def get_financial_data():
         display_val = f"${market_val_usd:,.2f}"
         
         total_pl_native = (last_price - buy_price) * qty
-        day_change = (last_price - prev_close) * qty
+        
+        # תוקן: שינוי יומי למניה בודדת (כמו באפליקציה) ולא לכל הפוזיציה
+        day_change_per_share = last_price - prev_close 
         
         total_pl_pct = ((last_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
         day_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
@@ -145,7 +153,7 @@ def get_financial_data():
             "Symbol": sym,
             "Qty": qty,
             "Price": display_price,
-            "Change Today": f"{color_val(day_change, '', '$')} <br><small>{color_val(day_pct, '%')}</small>",
+            "Change Today": f"{color_val(day_change_per_share, '', '$')} <br><small>{color_val(day_pct, '%')}</small>",
             "Avg Cost": display_cost,
             "Value": display_val,
             "Total P/L": f"{color_val(total_pl_native, '', '$')} <br><small>{color_val(total_pl_pct, '%')}</small>",
