@@ -8,20 +8,26 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן (IBI בלבד)
+# יתרה קודמת: -402.24$
+# מכירת LOW (נטו אחרי עמלת מכירה 7$): +2186.44$
+# יתרה חדשה: 1784.20$
 CASH_BALANCE = {
-    "USD": -402.24, 
+    "USD": 1784.20, 
     "ILS": 0.0 
 }
 
 # 2. התיק הנוכחי (ארה"ב בלבד)
 CURRENT_PORTFOLIO = [
     {"Symbol": "GLW",  "Qty": 22, "Buy_Price": 131.90, "Date": "17.02.2026", "Fee": 7.0},
-    {"Symbol": "LOW",  "Qty": 8,  "Buy_Price": 278.69, "Date": "17.02.2026", "Fee": 7.0},
     {"Symbol": "VIAV", "Qty": 98, "Buy_Price": 26.34,  "Date": "17.02.2026", "Fee": 7.0},
 ]
 
 # 3. היסטוריית מכירות (כלל המימושים הדולריים)
 SOLD_HISTORY = [
+    # --- מכירה אחרונה ---
+    {"Symbol": "LOW", "Qty": 8, "Sell_Price": 274.18, "Buy_Price": 278.69, "Date": "23.02.2026", "Fee_Total": 14.0},
+    
+    # --- היסטוריה ---
     {"Symbol": "PESI", "Qty": 218, "Sell_Price": 14.80, "Buy_Price": 14.83, "Date": "13.02.2026", "Fee_Total": 14.0},
     {"Symbol": "SMH", "Qty": 11, "Sell_Price": 408.00, "Buy_Price": 404.40, "Date": "13.02.2026", "Fee_Total": 14.0},
     {"Symbol": "AMTM", "Qty": 90, "Sell_Price": 31.44, "Buy_Price": 32.40, "Date": "12.02.2026", "Fee_Total": 14.0},
@@ -45,7 +51,7 @@ SOLD_HISTORY = [
 ]
 
 EARNINGS_CALENDAR = {
-    "GLW": "28/04/26", "LOW": "25/02/26", "VIAV": "05/05/26"
+    "GLW": "28/04/26", "VIAV": "05/05/26"
 }
 
 CURRENT_FEE = 7.0 
@@ -105,10 +111,8 @@ def get_financial_data():
             t = tickers.tickers[sym]
             last_price = t.fast_info.last_price
             
-            # ניסיון למשוך נתון יציב יותר לסגירה הקודמת כדי לתקן פערים באחוזים
             hist = t.history(period="5d")
             if not hist.empty and len(hist) >= 2:
-                # לוקח את הסגירה של היום הקודם
                 prev_close = hist['Close'].iloc[-2]
             else:
                 prev_close = t.fast_info.previous_close
@@ -129,7 +133,6 @@ def get_financial_data():
         
         total_pl_native = (last_price - buy_price) * qty
         
-        # תוקן: שינוי יומי למניה בודדת (כמו באפליקציה) ולא לכל הפוזיציה
         day_change_per_share = last_price - prev_close 
         
         total_pl_pct = ((last_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
