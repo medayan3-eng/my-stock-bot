@@ -8,11 +8,11 @@ from datetime import datetime
 # ==========================================
 
 # 1. יתרות מזומן (IBI בלבד)
-# יתרה קודמת: -402.24$
-# מכירת LOW (נטו אחרי עמלת מכירה 7$): +2186.44$
-# יתרה חדשה: 1784.20$
+# יתרה קודמת: 1784.20$
+# קניית WDC (נטו כולל עמלה 7$): -2173.40$
+# יתרה חדשה: -389.20$
 CASH_BALANCE = {
-    "USD": 1784.20, 
+    "USD": -389.20, 
     "ILS": 0.0 
 }
 
@@ -20,14 +20,13 @@ CASH_BALANCE = {
 CURRENT_PORTFOLIO = [
     {"Symbol": "GLW",  "Qty": 22, "Buy_Price": 131.90, "Date": "17.02.2026", "Fee": 7.0},
     {"Symbol": "VIAV", "Qty": 98, "Buy_Price": 26.34,  "Date": "17.02.2026", "Fee": 7.0},
+    # --- קנייה חדשה ---
+    {"Symbol": "WDC",  "Qty": 8,  "Buy_Price": 270.80, "Date": "24.02.2026", "Fee": 7.0},
 ]
 
 # 3. היסטוריית מכירות (כלל המימושים הדולריים)
 SOLD_HISTORY = [
-    # --- מכירה אחרונה ---
     {"Symbol": "LOW", "Qty": 8, "Sell_Price": 274.18, "Buy_Price": 278.69, "Date": "23.02.2026", "Fee_Total": 14.0},
-    
-    # --- היסטוריה ---
     {"Symbol": "PESI", "Qty": 218, "Sell_Price": 14.80, "Buy_Price": 14.83, "Date": "13.02.2026", "Fee_Total": 14.0},
     {"Symbol": "SMH", "Qty": 11, "Sell_Price": 408.00, "Buy_Price": 404.40, "Date": "13.02.2026", "Fee_Total": 14.0},
     {"Symbol": "AMTM", "Qty": 90, "Sell_Price": 31.44, "Buy_Price": 32.40, "Date": "12.02.2026", "Fee_Total": 14.0},
@@ -51,7 +50,7 @@ SOLD_HISTORY = [
 ]
 
 EARNINGS_CALENDAR = {
-    "GLW": "28/04/26", "VIAV": "05/05/26"
+    "GLW": "28/04/26", "VIAV": "05/05/26", "WDC": "TBD"
 }
 
 CURRENT_FEE = 7.0 
