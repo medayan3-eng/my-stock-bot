@@ -9,38 +9,37 @@ from datetime import datetime
 
 # 1. יתרות מזומן (IBI בלבד)
 # חישוב:
-# התחלה: -389.20
-# TLN (נטו): -249.18 (הפסד מומש + עמלות)
-# AXTI (נטו): -103.30 (הפסד מומש + עמלות)
-# WDC (מכירה נטו): +2,153.00
-# SPOT (קנייה): -3,704.40
-# GLW (תוספת קנייה): -2,335.64
+# התחלה: -4,628.72
+# מכירת VIAV (נטו): +2,847.74
+# מכירת GLW (22 יח' נטו): +3,345.36
 # -----------------------------
-# יתרה חדשה: -4,628.72
+# יתרה חדשה: 1,564.38
 CASH_BALANCE = {
-    "USD": -4628.72, 
+    "USD": 1564.38, 
     "ILS": 0.0 
 }
 
 # 2. התיק הנוכחי (ארה"ב בלבד)
 CURRENT_PORTFOLIO = [
-    # GLW - שכבה ראשונה
-    {"Symbol": "GLW",  "Qty": 22, "Buy_Price": 131.90, "Date": "17.02.2026", "Fee": 7.0},
-    # GLW - שכבה שנייה (תוספת חדשה)
+    # GLW - נשארה רק השכבה השנייה
     {"Symbol": "GLW",  "Qty": 16, "Buy_Price": 145.54, "Date": "05.03.2026", "Fee": 7.0},
     
-    {"Symbol": "VIAV", "Qty": 98, "Buy_Price": 26.34,  "Date": "17.02.2026", "Fee": 7.0},
+    # SPOT - עדיין מוחזק
     {"Symbol": "SPOT", "Qty": 7,  "Buy_Price": 528.20, "Date": "05.03.2026", "Fee": 7.0},
 ]
 
 # 3. היסטוריית מכירות (כלל המימושים הדולריים)
 SOLD_HISTORY = [
-    # --- מכירות חדשות ---
+    # --- מכירות חדשות (05.03.2026 - המשך היום) ---
+    {"Symbol": "GLW", "Qty": 22, "Sell_Price": 152.38, "Buy_Price": 131.90, "Date": "05.03.2026", "Fee_Total": 14.0},
+    {"Symbol": "VIAV", "Qty": 98, "Sell_Price": 29.13, "Buy_Price": 26.34, "Date": "05.03.2026", "Fee_Total": 14.0},
+    
+    # --- מכירות מוקדמות יותר היום ---
     {"Symbol": "WDC", "Qty": 8, "Sell_Price": 270.00, "Buy_Price": 270.80, "Date": "05.03.2026", "Fee_Total": 14.0},
     {"Symbol": "AXTI", "Qty": 95, "Sell_Price": 39.75, "Buy_Price": 40.69, "Date": "05.03.2026", "Fee_Total": 14.0},
     {"Symbol": "TLN", "Qty": 11, "Sell_Price": 338.51, "Buy_Price": 359.89, "Date": "05.03.2026", "Fee_Total": 14.0},
 
-    # --- מכירות קודמות ---
+    # --- מכירות עבר ---
     {"Symbol": "LOW", "Qty": 8, "Sell_Price": 274.18, "Buy_Price": 278.69, "Date": "23.02.2026", "Fee_Total": 14.0},
     {"Symbol": "PESI", "Qty": 218, "Sell_Price": 14.80, "Buy_Price": 14.83, "Date": "13.02.2026", "Fee_Total": 14.0},
     {"Symbol": "SMH", "Qty": 11, "Sell_Price": 408.00, "Buy_Price": 404.40, "Date": "13.02.2026", "Fee_Total": 14.0},
@@ -65,7 +64,7 @@ SOLD_HISTORY = [
 ]
 
 EARNINGS_CALENDAR = {
-    "GLW": "28/04/26", "VIAV": "05/05/26", "SPOT": "23/04/26"
+    "GLW": "28/04/26", "SPOT": "23/04/26"
 }
 
 CURRENT_FEE = 7.0 
