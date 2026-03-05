@@ -1,45 +1,56 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
 
 # ==========================================
-# 💾 נתוני המשתמש
+# 1. הגדרות ותצורה
+# ==========================================
+st.set_page_config(page_title="IBI Portfolio Tracker", layout="wide", page_icon="📊")
+
+# עיצוב מותאם אישית (RTL לעברית)
+st.markdown("""
+<style>
+    body {text-align: right; direction: rtl;}
+    .stMetric {text-align: center;}
+    div[data-testid="stMetricValue"] {font-size: 22px; font-weight: bold;}
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# 2. נתונים קשיחים (Hardcoded Data)
 # ==========================================
 
-# 1. יתרות מזומן (IBI בלבד)
-# חישוב:
-# התחלה: -4,628.72
-# מכירת VIAV (נטו): +2,847.74
-# מכירת GLW (22 יח' נטו): +3,345.36
-# -----------------------------
-# יתרה חדשה: 1,564.38
-CASH_BALANCE = {
-    "USD": 1564.38, 
-    "ILS": 0.0 
-}
+# חישוב מזומן מדויק לפי ה-PDF והדיווחים:
+# התחלה (אחרי מכירות GLW/VIAV): +1,564.38
+# קניית WDC (7 יח'): -1,900.71
+# ביניים: -336.33
+# --- החזרי מגן מס (מתוך ה-PDF) ---
+# 28/02: +471.16
+# 04/03: +270.83
+# סה"כ תוספת מזומן ממס: +741.99
+# יתרה סופית: 405.66 $
+CASH_BALANCE_USD = 405.66
 
-# 2. התיק הנוכחי (ארה"ב בלבד)
+# רשימת החזרי מס שהתקבלו (לצורך חישוב רווח כולל אמיתי)
+TAX_SHIELD_CREDITS = 741.99 
+
+# תיק ההחזקות הנוכחי (פתוח)
 CURRENT_PORTFOLIO = [
-    # GLW - נשארה רק השכבה השנייה
     {"Symbol": "GLW",  "Qty": 16, "Buy_Price": 145.54, "Date": "05.03.2026", "Fee": 7.0},
-    
-    # SPOT - עדיין מוחזק
     {"Symbol": "SPOT", "Qty": 7,  "Buy_Price": 528.20, "Date": "05.03.2026", "Fee": 7.0},
+    {"Symbol": "WDC",  "Qty": 7,  "Buy_Price": 270.53, "Date": "24.02.2026", "Fee": 7.0},
 ]
 
-# 3. היסטוריית מכירות (כלל המימושים הדולריים)
+# היסטוריית עסקאות סגורות (לחישוב רווח/הפסד ממומש)
 SOLD_HISTORY = [
-    # --- מכירות חדשות (05.03.2026 - המשך היום) ---
-    {"Symbol": "GLW", "Qty": 22, "Sell_Price": 152.38, "Buy_Price": 131.90, "Date": "05.03.2026", "Fee_Total": 14.0},
-    {"Symbol": "VIAV", "Qty": 98, "Sell_Price": 29.13, "Buy_Price": 26.34, "Date": "05.03.2026", "Fee_Total": 14.0},
-    
-    # --- מכירות מוקדמות יותר היום ---
-    {"Symbol": "WDC", "Qty": 8, "Sell_Price": 270.00, "Buy_Price": 270.80, "Date": "05.03.2026", "Fee_Total": 14.0},
-    {"Symbol": "AXTI", "Qty": 95, "Sell_Price": 39.75, "Buy_Price": 40.69, "Date": "05.03.2026", "Fee_Total": 14.0},
+    # --- עסקאות אחרונות (מתוך הדיווח שלך וה-PDF) ---
     {"Symbol": "TLN", "Qty": 11, "Sell_Price": 338.51, "Buy_Price": 359.89, "Date": "05.03.2026", "Fee_Total": 14.0},
+    {"Symbol": "AXTI", "Qty": 95, "Sell_Price": 39.75, "Buy_Price": 40.69, "Date": "05.03.2026", "Fee_Total": 14.0},
+    {"Symbol": "WDC", "Qty": 8, "Sell_Price": 270.00, "Buy_Price": 270.80, "Date": "05.03.2026", "Fee_Total": 14.0},
+    {"Symbol": "VIAV", "Qty": 98, "Sell_Price": 29.13, "Buy_Price": 26.34, "Date": "05.03.2026", "Fee_Total": 14.0},
+    {"Symbol": "GLW", "Qty": 22, "Sell_Price": 152.38, "Buy_Price": 131.90, "Date": "05.03.2026", "Fee_Total": 14.0},
 
-    # --- מכירות עבר ---
+    # --- עסקאות קודמות ---
     {"Symbol": "LOW", "Qty": 8, "Sell_Price": 274.18, "Buy_Price": 278.69, "Date": "23.02.2026", "Fee_Total": 14.0},
     {"Symbol": "PESI", "Qty": 218, "Sell_Price": 14.80, "Buy_Price": 14.83, "Date": "13.02.2026", "Fee_Total": 14.0},
     {"Symbol": "SMH", "Qty": 11, "Sell_Price": 408.00, "Buy_Price": 404.40, "Date": "13.02.2026", "Fee_Total": 14.0},
@@ -63,203 +74,162 @@ SOLD_HISTORY = [
     {"Symbol": "BIFT", "Qty": 625, "Sell_Price": 3.05, "Buy_Price": 3.21,  "Date": "13.01.2026", "Fee_Total": 14.0},
 ]
 
-EARNINGS_CALENDAR = {
-    "GLW": "28/04/26", "SPOT": "23/04/26"
-}
-
-CURRENT_FEE = 7.0 
-
 # ==========================================
-# ⚙️ הגדרות תצוגה
+# 3. מנוע חישובים
 # ==========================================
-st.set_page_config(page_title="US Portfolio", layout="wide", page_icon="🇺🇸")
-st.markdown("""
-<style>
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-    .big-font {font-size:18px !important; font-weight: bold;}
-    div[data-testid="stMetricValue"] {font-size: 24px;}
-</style>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# 🧠 מנוע חישובים פיננסיים
-# ==========================================
-def get_financial_data():
+def get_data():
+    # 1. שער דולר
     try:
-        usd_ils_ticker = yf.Ticker("ILS=X").history(period="1d")
-        if not usd_ils_ticker.empty:
-            rate = usd_ils_ticker['Close'].iloc[-1]
-        else:
-            rate = 3.65
+        usd = yf.Ticker("ILS=X").history(period="1d")['Close'].iloc[-1]
     except:
-        rate = 3.65
+        usd = 3.60 # Fallback
 
-    symbols = [i['Symbol'] for i in CURRENT_PORTFOLIO]
-    if not symbols: 
-        total_realized_pl_net_usd = 0
-        fees_paid_on_sold_total = 0
-        for s in SOLD_HISTORY:
-            gross = (s['Sell_Price'] - s['Buy_Price']) * s['Qty']
-            fees = s.get('Fee_Total', CURRENT_FEE * 2)
-            total_realized_pl_net_usd += (gross - fees)
-            fees_paid_on_sold_total += fees
-        return pd.DataFrame(), rate, 0, 0, total_realized_pl_net_usd, fees_paid_on_sold_total, 0
-
-    tickers = yf.Tickers(" ".join(symbols))
+    # 2. נתוני מניות חיות
+    tickers_list = [p['Symbol'] for p in CURRENT_PORTFOLIO]
+    if tickers_list:
+        tickers = yf.Tickers(" ".join(tickers_list))
     
-    live_rows = []
-    portfolio_market_value_usd = 0 
-    total_unrealized_pl_usd = 0
-    fees_paid_on_open_holdings = sum([item.get('Fee', 0) for item in CURRENT_PORTFOLIO])
-
+    live_data = []
+    total_market_value = 0
+    total_unrealized_pl = 0
+    
     for item in CURRENT_PORTFOLIO:
         sym = item['Symbol']
         qty = item['Qty']
         buy_price = item['Buy_Price']
         
-        last_price = 0
-        prev_close = 0
-        
+        # משיכת מחיר
         try:
             t = tickers.tickers[sym]
-            last_price = t.fast_info.last_price
+            current_price = t.fast_info.last_price
             
+            # ניסיון לקבל מחיר סגירה קודם אמין
             hist = t.history(period="5d")
-            if not hist.empty and len(hist) >= 2:
-                prev_close = hist['Close'].iloc[-2]
-            else:
-                prev_close = t.fast_info.previous_close
+            prev_close = hist['Close'].iloc[-2] if len(hist) >= 2 else t.fast_info.previous_close
         except:
-            pass
-
-        if not last_price or last_price == 0:
-            last_price = buy_price
+            current_price = buy_price
             prev_close = buy_price
 
-        # חישובים דולריים
-        cost_basis_usd = buy_price * qty
-        market_val_usd = last_price * qty
-        
-        display_price = f"${last_price:,.2f}"
-        display_cost = f"${buy_price:,.2f}"
-        display_val = f"${market_val_usd:,.2f}"
-        
-        total_pl_native = (last_price - buy_price) * qty
-        
-        day_change_per_share = last_price - prev_close 
-        
-        total_pl_pct = ((last_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
-        day_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
+        # חישובים
+        market_val = current_price * qty
+        cost_basis = buy_price * qty
+        unrealized_pl = market_val - cost_basis
+        day_change_usd = current_price - prev_close
+        day_change_pct = (day_change_usd / prev_close) * 100
+        total_change_pct = (unrealized_pl / cost_basis) * 100
 
-        portfolio_market_value_usd += market_val_usd
-        total_unrealized_pl_usd += (market_val_usd - cost_basis_usd)
-        
-        analyst = "-"
-        try:
-            info = tickers.tickers[sym].info
-            rec = info.get('recommendationKey', 'N/A').replace('_', ' ').upper()
-            analyst = rec if rec != "N/A" else "-"
-        except: pass
+        total_market_value += market_val
+        total_unrealized_pl += unrealized_pl
 
-        def color_val(val, suffix="", prefix=""):
-            c = "#2ecc71" if val >= 0 else "#e74c3c"
-            return f'<span style="color:{c}; font-weight:bold;">{prefix}{val:,.2f}{suffix}</span>'
+        # עיצוב צבעים
+        def color(val, suffix=""):
+            c = "green" if val >= 0 else "red"
+            return f'<span style="color:{c}">{val:,.2f}{suffix}</span>'
 
-        live_rows.append({
+        live_data.append({
             "Symbol": sym,
             "Qty": qty,
-            "Price": display_price,
-            "Change Today": f"{color_val(day_change_per_share, '', '$')} <br><small>{color_val(day_pct, '%')}</small>",
-            "Avg Cost": display_cost,
-            "Value": display_val,
-            "Total P/L": f"{color_val(total_pl_native, '', '$')} <br><small>{color_val(total_pl_pct, '%')}</small>",
-            "Analysts": analyst,
-            "Next Report": EARNINGS_CALENDAR.get(sym, "-")
+            "Price": f"${current_price:,.2f}",
+            "Day Change": f"{color(day_change_usd, '$')} ({color(day_change_pct, '%')})",
+            "Cost": f"${buy_price:,.2f}",
+            "Value": f"${market_val:,.2f}",
+            "Unrealized P/L": f"{color(unrealized_pl, '$')} ({color(total_change_pct, '%')})"
         })
 
-    total_realized_pl_net_usd = 0
-    fees_paid_on_sold_total = 0
-    for s in SOLD_HISTORY:
-        gross = (s['Sell_Price'] - s['Buy_Price']) * s['Qty']
-        fees = s.get('Fee_Total', CURRENT_FEE * 2)
-        total_realized_pl_net_usd += (gross - fees)
-        fees_paid_on_sold_total += fees
+    # 3. חישובים היסטוריים (Realized)
+    total_realized_pl = 0
+    total_fees = 0
+    for trade in SOLD_HISTORY:
+        # רווח/הפסד גולמי
+        gross_pl = (trade['Sell_Price'] - trade['Buy_Price']) * trade['Qty']
+        # עמלות
+        fees = trade.get('Fee_Total', 14.0)
+        # נטו לעסקה
+        net_trade = gross_pl - fees
+        
+        total_realized_pl += net_trade
+        total_fees += fees
 
-    total_fees_lifetime = fees_paid_on_open_holdings + fees_paid_on_sold_total
+    # עמלות על התיק הפתוח
+    open_fees = sum([p['Fee'] for p in CURRENT_PORTFOLIO])
     
-    return pd.DataFrame(live_rows), rate, portfolio_market_value_usd, total_unrealized_pl_usd, total_realized_pl_net_usd, total_fees_lifetime, fees_paid_on_open_holdings
+    return pd.DataFrame(live_data), usd, total_market_value, total_unrealized_pl, total_realized_pl, open_fees
 
 # ==========================================
-# 📱 ממשק
+# 4. ממשק משתמש (UI)
 # ==========================================
-st.title("🇺🇸 My US Portfolio")
+st.title("IBI Portfolio Dashboard 🇺🇸")
 
-if st.button("🔄 REFRESH DATA", type="primary", use_container_width=True):
+if st.button("🔄 רענן נתונים"):
     st.rerun()
 
-with st.spinner("Fetching Wall Street Data..."):
-    df_live, rate, port_val, unrealized_pl, realized_pl_net, total_fees, fees_open = get_financial_data()
+with st.spinner("מושך נתונים מהבורסה..."):
+    df, rate, port_val, unrealized, realized, open_fees = get_data()
 
-# חישוב שווי נקי כולל
-total_net_worth_usd = port_val + CASH_BALANCE["USD"]
-total_net_worth_ils = total_net_worth_usd * rate
-grand_total_profit = unrealized_pl + realized_pl_net - fees_open
+# --- חישובים סופיים ---
+# שווי תיק כולל (מזומן + מניות)
+total_equity_usd = port_val + CASH_BALANCE_USD
+total_equity_ils = total_equity_usd * rate
 
-# חישוב אחוז תשואה (ROI)
-invested_capital = total_net_worth_usd - grand_total_profit
-portfolio_return_pct = (grand_total_profit / invested_capital) * 100 if invested_capital > 0 else 0
+# רווח "אמיתי" (True Profit)
+# הנוסחה: רווח מומש + רווח על הנייר - עמלות פתוחות + החזרי מס (מגן מס)
+true_profit_usd = realized + unrealized - open_fees + TAX_SHIELD_CREDITS
+true_profit_ils = true_profit_usd * rate
 
-st.markdown("### 🏦 Account Snapshot")
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Net Worth ($)", f"${total_net_worth_usd:,.2f}")
+# אחוז תשואה כולל (ROI)
+# ההון העצמי שהושקע = שווי נוכחי פחות הרווח שעשינו
+invested_capital = total_equity_usd - true_profit_usd
+roi_pct = (true_profit_usd / invested_capital * 100) if invested_capital > 0 else 0
 
-color_roi = "normal" if portfolio_return_pct >= 0 else "inverse"
-m2.metric("Net Worth (₪)", f"₪{total_net_worth_ils:,.2f}", f"ROI: {portfolio_return_pct:.2f}%", delta_color=color_roi)
+# --- תצוגת מדדים (Metrics) ---
+st.markdown("### 🏦 סטטוס חשבון (Status Snapshot)")
 
-m3.metric("Liquid Cash ($)", f"${CASH_BALANCE['USD']:,.2f}", help="Cash available (Negative means margin used)")
-m4.metric("Total Net Profit", f"${grand_total_profit:,.2f}", delta_color="normal" if grand_total_profit>=0 else "inverse")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("שווי תיק (USD)", f"${total_equity_usd:,.2f}")
+col1.caption(f"שווי בשקלים: ₪{total_equity_ils:,.2f}")
 
-st.markdown("---")
+col2.metric("מזומן נזיל", f"${CASH_BALANCE_USD:,.2f}", delta_color="normal")
+col2.caption("כולל החזרי מגן מס")
 
-tab1, tab2, tab3 = st.tabs(["📊 Live Assets", "🧾 Buy Log", "💰 Realized P/L"])
+col3.metric("רווח כולל אמיתי", f"${true_profit_usd:,.2f}", delta=f"{roi_pct:.2f}%")
+col3.caption(f"כולל מגן מס: +${TAX_SHIELD_CREDITS:,.2f}")
+
+col4.metric("שער דולר רציף", f"₪{rate:.3f}")
+
+st.divider()
+
+# --- לשוניות פירוט ---
+tab1, tab2, tab3 = st.tabs(["📈 תיק מניות חי", "💰 ניתוח רווחים", "📜 יומן עסקאות"])
 
 with tab1:
-    if not df_live.empty:
-        st.write(df_live.to_html(escape=False, index=False), unsafe_allow_html=True)
+    if not df.empty:
+        st.write(df.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
-        st.info("No active holdings.")
+        st.info("התיק ריק כרגע.")
 
 with tab2:
-    buy_rows = []
-    for p in CURRENT_PORTFOLIO:
-        fee = p.get('Fee', 0)
-        price_d = f"${p['Buy_Price']:,.2f}"
-        cost_d = f"${(p['Qty']*p['Buy_Price'])+fee:,.2f}"
-            
-        buy_rows.append({"Symbol": p['Symbol'], "Date": p['Date'], "Qty": p['Qty'], "Price": price_d, "Fee": f"${fee}", "Total Cost": cost_d})
-    st.dataframe(pd.DataFrame(buy_rows), use_container_width=True)
+    st.subheader("פירוק הרווח וההפסד (P/L Breakdown)")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("רווח מומש (סגור)", f"${realized:,.2f}", help="כולל עמלות מסחר")
+    c2.metric("רווח על הנייר (פתוח)", f"${unrealized:,.2f}")
+    c3.metric("זיכוי מגן מס (Cash In)", f"${TAX_SHIELD_CREDITS:,.2f}", help="כסף שנכנס לחשבון כהחזר מס")
+    
+    st.info(f"💡 **הסבר:** הסכום 'רווח כולל אמיתי' למעלה מחושב כך: רווח מומש ({realized:.0f}) + רווח פתוח ({unrealized:.0f}) + החזרי מס ({TAX_SHIELD_CREDITS}) - עמלות קנייה פתוחות ({open_fees}).")
 
 with tab3:
-    st.subheader("💸 Realized P/L (Net)")
-    sold_rows = []
-    for s in SOLD_HISTORY:
-        buy_cost = s['Buy_Price'] * s['Qty']
-        sell_rev = s['Sell_Price'] * s['Qty']
-        fees = s.get('Fee_Total', CURRENT_FEE * 2)
-        net = sell_rev - buy_cost - fees
-        c = "green" if net > 0 else "red"
-        sold_rows.append({
-            "Symbol": s['Symbol'], "Qty": s['Qty'], 
-            "Net Profit ($)": f'<span style="color:{c}; font-weight:bold;">${net:,.2f}</span>'
-        })
-    st.write(pd.DataFrame(sold_rows).to_html(escape=False, index=False), unsafe_allow_html=True)
+    st.subheader("היסטוריית מכירות (סגורות)")
     
-    # סיכום רווח ממומש בתחתית
-    total_realized_color = "green" if realized_pl_net >= 0 else "red"
-    st.markdown(f"""
-    <div style="text-align: center; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background-color: #f0f2f6; margin-top: 20px;">
-        <h3 style="margin:0;">Total Realized Profit (Closed Positions)</h3>
-        <h1 style="color: {total_realized_color}; margin:0;">${realized_pl_net:,.2f}</h1>
-        <small>After all fees (No Tax)</small>
-    </div>
-    """, unsafe_allow_html=True)
+    hist_data = []
+    for t in SOLD_HISTORY:
+        net = (t['Sell_Price'] - t['Buy_Price']) * t['Qty'] - t.get('Fee_Total', 14)
+        c = "green" if net > 0 else "red"
+        hist_data.append({
+            "Symbol": t['Symbol'],
+            "Qty": t['Qty'],
+            "Buy": f"${t['Buy_Price']}",
+            "Sell": f"${t['Sell_Price']}",
+            "Net Profit": f'<span style="color:{c}; font-weight:bold;">${net:,.2f}</span>',
+            "Date": t['Date']
+        })
+    st.write(pd.DataFrame(hist_data).to_html(escape=False, index=False), unsafe_allow_html=True)
+
