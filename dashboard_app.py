@@ -3,7 +3,8 @@ dashboard_app.py
 Streamlit UI for the Murphy Screener.
 
 Deploy this as your Streamlit Cloud main module. It needs
-murphy_screener.py and sp500_tickers.csv in the SAME folder/repo.
+murphy_screener.py in the SAME folder/repo (the S&P 500 ticker/sector
+list is embedded directly in murphy_screener.py — no external file needed).
 """
 
 import streamlit as st
@@ -131,14 +132,21 @@ def score_badge(score):
 with st.sidebar:
     st.markdown("### ⚙️ Scan settings")
 
-    mode = st.radio("Ticker universe", ["Manual list", "Full S&P 500 (slow)"], index=0)
+    SP500_TOTAL = len(ms.get_sp500_tickers())
+
+    mode = st.radio("Ticker universe", ["Manual list", "S&P 500 subset", "Full S&P 500 (slow)"], index=0)
 
     if mode == "Manual list":
         default_list = "AAPL, MSFT, NVDA, GOOGL, AMZN, META, AVGO, TSLA, JPM, XOM"
         tickers_input = st.text_area("Tickers (comma-separated)", value=default_list, height=100)
         tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    elif mode == "S&P 500 subset":
+        n = st.slider(f"How many S&P 500 tickers to scan (1–{SP500_TOTAL})", 1, SP500_TOTAL, 50)
+        st.caption(f"Scans the first {n} tickers from the S&P 500 list.")
+        tickers = ms.get_sp500_tickers(n)
     else:
-        st.info("Scanning the full S&P 500 can take several minutes due to Yahoo Finance rate limits.")
+        st.info(f"Scanning all {SP500_TOTAL} S&P 500 tickers can take several minutes "
+                "due to Yahoo Finance rate limits.")
         tickers = ms.get_sp500_tickers()
 
     top_n = st.slider("Number of results to show", 5, 50, 20)
