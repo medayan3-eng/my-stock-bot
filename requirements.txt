@@ -1,9 +1,5 @@
 streamlit
-pandas
 yfinance
-plotly
-openpyxl
-google-generativeai>=0.7.0
-xlsxwriter
-schedule
-
+pandas
+numpy
+matplotlib
