@@ -7,13 +7,13 @@ in plain English why it scored that way. You decide what to trade.
 ## Files
 | File | Purpose |
 |---|---|
-| `murphy_screener.py` | Core engine — data fetching, indicators, scoring logic. Also runnable as a CLI. |
+| `murphy_screener.py` | Core engine — data fetching, indicators, scoring logic, and the full S&P 500 ticker/sector list (embedded directly in the code, not an external file). Also runnable as a CLI. |
 | `dashboard_app.py` | Streamlit web UI. **This is the Streamlit Cloud main module.** |
-| `sp500_tickers.csv` | Bundled S&P 500 ticker + sector list (used instead of a live Wikipedia scrape). |
 | `requirements.txt` | Python dependencies for deployment. |
 
-All four files must live in the **same folder** (repo root, or the same subfolder) — the dashboard
-imports `murphy_screener.py` directly and both scripts load `sp500_tickers.csv` from their own folder.
+Both Python files must live in the **same folder** (repo root, or the same subfolder) — the dashboard
+imports `murphy_screener.py` directly. The S&P 500 list is embedded in code specifically so nothing
+breaks if a data file goes missing or the working directory changes on deployment.
 
 ## Run locally
 ```
@@ -23,14 +23,18 @@ streamlit run dashboard_app.py
 
 ## Run as a CLI (no browser UI)
 ```
-python murphy_screener.py                     # scans the full bundled S&P 500 list
+python murphy_screener.py                     # scans the full embedded S&P 500 list
 python murphy_screener.py AAPL MSFT NVDA       # scans just these tickers
 python murphy_screener.py --file mylist.txt    # one ticker per line
 python murphy_screener.py --top 20             # show only top 20 by score
 ```
 
+In the dashboard, the sidebar lets you pick **Manual list**, an **S&P 500 subset** (choose any count
+from 1 up to the full ~505 tickers with a slider), or the **Full S&P 500**.
+
 ## Deploy on Streamlit Cloud
-1. Push all four files to your GitHub repo (root of the `main` branch).
+1. Push all three files (`murphy_screener.py`, `dashboard_app.py`, `requirements.txt`) to your GitHub
+   repo (root of the `main` branch).
 2. In Streamlit Cloud app settings, set **Main file path** to `dashboard_app.py`.
 3. Streamlit installs `requirements.txt` automatically and deploys.
 
@@ -52,7 +56,8 @@ Every stock also gets a **stop-loss** (below the nearest support / 50-MA, whiche
 
 ## Notes
 - The app fetches live data via `yfinance` — it needs internet access at run time.
-- The bundled `sp500_tickers.csv` is a static snapshot; some tickers may have since been added/removed
-  from the index. Feel free to edit the CSV or pass your own list with `--file` / the manual-list mode.
+- The embedded S&P 500 list (in `murphy_screener.py`, the `SP500_DATA` dict) is a static snapshot;
+  some tickers may have since been added/removed from the index. Edit that dict directly, or pass
+  your own list with `--file` / the manual-list mode in the dashboard.
 - This is a research/screening tool, not investment advice. All trading decisions are yours.
 - Tune weights/thresholds (e.g. `VOLUME_SPIKE_MULT`, `NEAR_MA50_PCT`) at the top of `murphy_screener.py`.
