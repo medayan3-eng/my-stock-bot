@@ -132,24 +132,32 @@ def score_badge(score):
 with st.sidebar:
     st.markdown("### ⚙️ Scan settings")
 
-    SP500_TOTAL = len(ms.get_sp500_tickers())
+    UNIVERSE_LABELS = {
+        "S&P 500 (large-cap)": "sp500",
+        "S&P 400 (mid-cap)": "sp400",
+        "S&P 600 (small-cap)": "sp600",
+        "All combined (500+400+600)": "all",
+    }
 
-    mode = st.radio("Ticker universe", ["Manual list", "S&P 500 subset", "Full S&P 500 (slow)"], index=0)
+    mode = st.radio("Ticker universe", ["Manual list", "Index universe"], index=0)
 
     if mode == "Manual list":
-        default_list = "AAPL, MSFT, NVDA, GOOGL, AMZN, META, AVGO, TSLA, JPM, XOM"
-        tickers_input = st.text_area("Tickers (comma-separated)", value=default_list, height=100)
+        default_list = "AAPL, MSFT, NVDA, GOOGL, AMZN, META, AVGO, TSLA, JPM, XOM, SPY, XLK"
+        tickers_input = st.text_area("Tickers (comma-separated) — stocks and ETFs both OK",
+                                      value=default_list, height=100)
         tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
-    elif mode == "S&P 500 subset":
-        n = st.slider(f"How many S&P 500 tickers to scan (1–{SP500_TOTAL})", 1, SP500_TOTAL, 50)
-        st.caption(f"Scans the first {n} tickers from the S&P 500 list.")
-        tickers = ms.get_sp500_tickers(n)
     else:
-        st.info(f"Scanning all {SP500_TOTAL} S&P 500 tickers can take several minutes "
-                "due to Yahoo Finance rate limits.")
-        tickers = ms.get_sp500_tickers()
+        universe_label = st.selectbox("Which index?", list(UNIVERSE_LABELS.keys()))
+        universe_key = UNIVERSE_LABELS[universe_label]
+        universe_total = len(ms.get_universe_tickers(universe_key))
+        n = st.slider(f"How many tickers to scan (1–{universe_total})", 1, universe_total,
+                      min(50, universe_total))
+        st.caption(f"Scans the first {n} of {universe_total} tickers in {universe_label}.")
+        if n > 150:
+            st.info("Scanning more than ~150 tickers can take several minutes due to Yahoo Finance rate limits.")
+        tickers = ms.get_universe_tickers(universe_key, n)
 
-    top_n = st.slider("Number of results to show", 5, 50, 20)
+    top_n = st.slider("Number of results to show (per list)", 5, 50, 20)
     run_button = st.button("🔍 Run scan", type="primary", use_container_width=True)
 
     st.markdown("---")
@@ -178,6 +186,11 @@ def cached_history(ticker):
 @st.cache_data(ttl=3600, show_spinner=False)
 def cached_sector(ticker):
     return ms.get_sector(ticker)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_is_etf(ticker):
+    return ms.is_etf(ticker)
 
 
 # ---------------------------------------------------------------------------
@@ -218,53 +231,81 @@ if run_button:
             use_container_width=True, hide_index=True,
         )
 
+        strong, weak = ms.summarize_sector_strength(sector_leaderboard)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(
+                '<div class="card"><b>🟢 Sectors showing strength</b><br>' +
+                (", ".join(f"{s} ({e})" for s, e in strong) or "n/a") + "</div>",
+                unsafe_allow_html=True,
+            )
+        with c2:
+            st.markdown(
+                '<div class="card"><b>🔴 Sectors showing weakness</b><br>' +
+                (", ".join(f"{s} ({e})" for s, e in weak) or "n/a") + "</div>",
+                unsafe_allow_html=True,
+            )
+
     st.markdown(f'<div class="section-title">📋 Scan Results ({len(tickers)} tickers)</div>', unsafe_allow_html=True)
     progress = st.progress(0.0, text="Starting scan...")
-    results = []
+    stock_results, etf_results = [], []
     for i, ticker in enumerate(tickers, start=1):
         progress.progress(i / len(tickers), text=f"Scanning {ticker} ({i}/{len(tickers)})")
         try:
             df = cached_history(ticker)
             if df is None:
                 continue
-            sector = cached_sector(ticker)
-            res = ms.score_stock(ticker, df, sector, sector_leaderboard, regime)
-            results.append(res)
+            etf_flag = cached_is_etf(ticker)
+            sector = "ETF" if etf_flag else cached_sector(ticker)
+            res = ms.score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=etf_flag)
+            (etf_results if etf_flag else stock_results).append(res)
         except Exception as e:
             st.warning(f"Skipped {ticker}: {e}")
     progress.empty()
 
-    if not results:
+    if not stock_results and not etf_results:
         st.error("No results returned. Check your tickers and try again.")
         st.stop()
 
-    df_out = pd.DataFrame(results).sort_values("Score", ascending=False).head(top_n)
+    display_cols = ["Ticker", "Score", "Sector", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
+    money_cols = ["Price", "StopLoss", "Target", "R:R"]
 
-    st.dataframe(
-        df_out[["Ticker", "Score", "Sector", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]]
-        .style.background_gradient(subset=["Score"], cmap="RdYlGn", vmin=0, vmax=100),
-        use_container_width=True, hide_index=True,
-    )
+    def render_results(results, title, icon, csv_name):
+        if not results:
+            return
+        df_out = pd.DataFrame(results).sort_values("Score", ascending=False).head(top_n)
 
-    st.markdown('<div class="section-title">🔎 Per-Stock Breakdown</div>', unsafe_allow_html=True)
-    for _, row in df_out.iterrows():
-        header = f"{row['Ticker']} — {row['Sector']}"
-        with st.expander(header):
-            st.markdown(
-                f'{score_badge(row["Score"])} &nbsp; <span class="sector-chip">{row["Sector"]}</span>',
-                unsafe_allow_html=True,
-            )
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Price", row["Price"])
-            c2.metric("Stop-loss", row["StopLoss"])
-            c3.metric("Target", row["Target"])
-            c4.metric("R:R", row["R:R"])
-            st.markdown("**Why it scored this way:**")
-            for r in row["Reasons"]:
-                st.markdown(f'<div class="reason-item">• {r}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-title">{icon} {title} ({len(results)} found)</div>', unsafe_allow_html=True)
+        st.dataframe(
+            df_out[display_cols]
+            .style.background_gradient(subset=["Score"], cmap="RdYlGn", vmin=0, vmax=100)
+            .format({c: "{:.2f}" for c in money_cols}),
+            use_container_width=True, hide_index=True,
+        )
 
-    csv = df_out.assign(Reasons=df_out["Reasons"].apply(lambda r: " | ".join(r))).to_csv(index=False).encode("utf-8-sig")
-    st.download_button("⬇️ Download full CSV", csv, "screener_results.csv", "text/csv", use_container_width=True)
+        st.markdown(f'<div class="section-title">🔎 {title} — Per-Ticker Breakdown</div>', unsafe_allow_html=True)
+        for _, row in df_out.iterrows():
+            header = f"{row['Ticker']} — {row['Sector']}"
+            with st.expander(header):
+                st.markdown(
+                    f'{score_badge(row["Score"])} &nbsp; <span class="sector-chip">{row["Sector"]}</span>',
+                    unsafe_allow_html=True,
+                )
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Price", f"{row['Price']:.2f}")
+                c2.metric("Stop-loss", f"{row['StopLoss']:.2f}")
+                c3.metric("Target", f"{row['Target']:.2f}")
+                c4.metric("R:R", f"{row['R:R']:.2f}" if row["R:R"] is not None else "n/a")
+                st.markdown("**Why it scored this way:**")
+                for r in row["Reasons"]:
+                    st.markdown(f'<div class="reason-item">• {r}</div>', unsafe_allow_html=True)
+
+        csv = df_out.assign(Reasons=df_out["Reasons"].apply(lambda r: " | ".join(r))).to_csv(index=False).encode("utf-8-sig")
+        st.download_button(f"⬇️ Download {title} CSV", csv, csv_name, "text/csv",
+                            use_container_width=True, key=csv_name)
+
+    render_results(stock_results, "Stocks", "📈", "screener_results_stocks.csv")
+    render_results(etf_results, "ETFs", "🧺", "screener_results_etfs.csv")
 
 else:
     st.info("Set your tickers in the sidebar and click **Run scan**.")
