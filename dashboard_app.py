@@ -3,8 +3,8 @@ dashboard_app.py
 Streamlit UI for the Murphy Screener.
 
 Deploy this as your Streamlit Cloud main module. It needs
-murphy_screener.py in the SAME folder/repo (the S&P 500 ticker/sector
-list is embedded directly in murphy_screener.py — no external file needed).
+murphy_screener.py (and sp_universe_data.py, which murphy_screener.py
+imports) in the SAME folder/repo.
 """
 
 import streamlit as st
@@ -97,6 +97,9 @@ st.markdown(
         margin: 3px 0;
     }
 
+    .pct-up { color: #38ef7d; font-weight: 700; }
+    .pct-down { color: #fc6767; font-weight: 700; }
+
     div[data-testid="stMetricValue"] { color: #4fc3f7; }
     </style>
     """,
@@ -124,6 +127,100 @@ def score_badge(score):
     else:
         cls = "badge-low"
     return f'<span class="badge {cls}">{score:.0f}</span>'
+
+
+def pct_html(value):
+    if value is None or value != value:  # NaN check
+        return "n/a"
+    cls = "pct-up" if value >= 0 else "pct-down"
+    arrow = "▲" if value >= 0 else "▼"
+    return f'<span class="{cls}">{arrow} {value:+.2f}%</span>'
+
+
+# ---------------------------------------------------------------------------
+# Cached data fetchers (avoid re-hitting Yahoo Finance on every rerun)
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_regime():
+    return ms.get_intermarket_regime()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_sector_leaderboard():
+    return ms.get_sector_leaderboard()
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def cached_history(ticker):
+    return ms.fetch_history(ticker)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_sector(ticker):
+    return ms.get_sector(ticker)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_is_etf(ticker):
+    return ms.is_etf(ticker)
+
+
+# ---------------------------------------------------------------------------
+# LIVE HOME SCREEN: intermarket regime + sector leaderboard
+# (shown immediately, before any scan is run)
+# ---------------------------------------------------------------------------
+st.markdown('<div class="section-title">🌍 Current Intermarket Regime</div>', unsafe_allow_html=True)
+with st.spinner("Reading the intermarket regime (SPY / TLT / DBC / UUP)..."):
+    regime = cached_regime()
+st.markdown(f'<div class="card">{regime["description"]}</div>', unsafe_allow_html=True)
+trend_cols = st.columns(4)
+arrow_map = {"up": "🟢 Rising", "down": "🔴 Falling", "flat": "⚪ Flat", "unknown": "❓ Unknown"}
+for col, (name, trend) in zip(trend_cols, regime["trends"].items()):
+    col.metric(name, arrow_map.get(trend, trend))
+
+st.markdown('<div class="section-title">🏭 Sector Leaderboard (vs. SPY)</div>', unsafe_allow_html=True)
+with st.spinner("Building sector relative-strength leaderboard..."):
+    sector_leaderboard = cached_sector_leaderboard()
+
+strong_etfs = set()
+if sector_leaderboard:
+    lb_rows = []
+    for etf, info in sorted(sector_leaderboard.items(), key=lambda kv: kv[1]["rank"]):
+        lb_rows.append({
+            "Rank": info["rank"], "Sector": info["sector"], "ETF": etf,
+            "Price": info.get("price"),
+            "Today %": info.get("day_change_pct"),
+            "1w %": round(info["1w"], 2) if info["1w"] == info["1w"] else None,
+            "1m %": round(info["1m"], 2) if info["1m"] == info["1m"] else None,
+            "3m %": round(info["3m"], 2) if info["3m"] == info["3m"] else None,
+            "12m %": round(info["12m"], 2) if info["12m"] == info["12m"] else None,
+        })
+    lb_df = pd.DataFrame(lb_rows)
+    st.dataframe(
+        lb_df.style
+        .background_gradient(subset=["1m %", "3m %"], cmap="RdYlGn")
+        .format({"Price": "{:.2f}", "Today %": "{:+.2f}%", "1w %": "{:.2f}", "1m %": "{:.2f}",
+                 "3m %": "{:.2f}", "12m %": "{:.2f}"}),
+        use_container_width=True, hide_index=True,
+    )
+
+    strong, weak = ms.summarize_sector_strength(sector_leaderboard)
+    strong_etfs = ms.strong_sector_etfs(sector_leaderboard)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(
+            '<div class="card"><b>🟢 Sectors showing strength</b><br>' +
+            (", ".join(f"{s} ({e})" for s, e in strong) or "n/a") + "</div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            '<div class="card"><b>🔴 Sectors showing weakness</b><br>' +
+            (", ".join(f"{s} ({e})" for s, e in weak) or "n/a") + "</div>",
+            unsafe_allow_html=True,
+        )
+else:
+    st.info("Sector leaderboard unavailable right now (data fetch issue). Try refreshing.")
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +254,12 @@ with st.sidebar:
             st.info("Scanning more than ~150 tickers can take several minutes due to Yahoo Finance rate limits.")
         tickers = ms.get_universe_tickers(universe_key, n)
 
+    only_strong = st.checkbox(
+        "Only show stocks from currently-strong sectors", value=True,
+        help="Per Murphy's sector-rotation approach: focus only on stocks whose sector is in the "
+             "top third of the relative-strength leaderboard above. ETFs are never filtered by this.",
+    )
+
     top_n = st.slider("Number of results to show (per list)", 5, 50, 20)
     run_button = st.button("🔍 Run scan", type="primary", use_container_width=True)
 
@@ -166,31 +269,17 @@ with st.sidebar:
 
 
 # ---------------------------------------------------------------------------
-# Cached data fetchers (avoid re-hitting Yahoo Finance on every rerun)
+# Relative-strength chart helper (stock vs SPY, normalized to 100)
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=3600, show_spinner=False)
-def cached_regime():
-    return ms.get_intermarket_regime()
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def cached_sector_leaderboard():
-    return ms.get_sector_leaderboard()
-
-
-@st.cache_data(ttl=1800, show_spinner=False)
-def cached_history(ticker):
-    return ms.fetch_history(ticker)
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def cached_sector(ticker):
-    return ms.get_sector(ticker)
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def cached_is_etf(ticker):
-    return ms.is_etf(ticker)
+def render_relative_strength_chart(ticker, stock_df):
+    spy_df = cached_history("SPY")
+    rel = ms.get_relative_strength_series(stock_df, spy_df, lookback=126)
+    if rel is None:
+        st.caption("Not enough data to draw a relative-strength chart.")
+        return
+    st.caption(f"{ticker} vs. SPY — rebased to 100, last {len(rel)} trading days. "
+               "If the stock's line is above SPY's, it's outperforming the market.")
+    st.line_chart(rel, use_container_width=True, height=220)
 
 
 # ---------------------------------------------------------------------------
@@ -201,54 +290,13 @@ if run_button:
         st.warning("No tickers entered.")
         st.stop()
 
-    with st.spinner("Reading the intermarket regime (SPY / TLT / DBC / UUP)..."):
-        regime = cached_regime()
-
-    st.markdown('<div class="section-title">🌍 Current Intermarket Regime</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="card">{regime["description"]}</div>', unsafe_allow_html=True)
-    trend_cols = st.columns(4)
-    arrow_map = {"up": "🟢 Rising", "down": "🔴 Falling", "flat": "⚪ Flat", "unknown": "❓ Unknown"}
-    for col, (name, trend) in zip(trend_cols, regime["trends"].items()):
-        col.metric(name, arrow_map.get(trend, trend))
-
-    with st.spinner("Building sector relative-strength leaderboard..."):
-        sector_leaderboard = cached_sector_leaderboard()
-
-    if sector_leaderboard:
-        st.markdown('<div class="section-title">🏭 Sector Leaderboard (vs. SPY)</div>', unsafe_allow_html=True)
-        lb_rows = []
-        for etf, info in sorted(sector_leaderboard.items(), key=lambda kv: kv[1]["rank"]):
-            lb_rows.append({
-                "Rank": info["rank"], "Sector": info["sector"], "ETF": etf,
-                "1w %": round(info["1w"], 2) if info["1w"] == info["1w"] else None,
-                "1m %": round(info["1m"], 2) if info["1m"] == info["1m"] else None,
-                "3m %": round(info["3m"], 2) if info["3m"] == info["3m"] else None,
-                "12m %": round(info["12m"], 2) if info["12m"] == info["12m"] else None,
-            })
-        lb_df = pd.DataFrame(lb_rows)
-        st.dataframe(
-            lb_df.style.background_gradient(subset=["1m %", "3m %"], cmap="RdYlGn"),
-            use_container_width=True, hide_index=True,
-        )
-
-        strong, weak = ms.summarize_sector_strength(sector_leaderboard)
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(
-                '<div class="card"><b>🟢 Sectors showing strength</b><br>' +
-                (", ".join(f"{s} ({e})" for s, e in strong) or "n/a") + "</div>",
-                unsafe_allow_html=True,
-            )
-        with c2:
-            st.markdown(
-                '<div class="card"><b>🔴 Sectors showing weakness</b><br>' +
-                (", ".join(f"{s} ({e})" for s, e in weak) or "n/a") + "</div>",
-                unsafe_allow_html=True,
-            )
+    regime = cached_regime()
+    sector_leaderboard_scan = cached_sector_leaderboard()
+    strong_etfs_scan = ms.strong_sector_etfs(sector_leaderboard_scan) if sector_leaderboard_scan else set()
 
     st.markdown(f'<div class="section-title">📋 Scan Results ({len(tickers)} tickers)</div>', unsafe_allow_html=True)
     progress = st.progress(0.0, text="Starting scan...")
-    stock_results, etf_results = [], []
+    stock_results, etf_results, skipped_weak = [], [], 0
     for i, ticker in enumerate(tickers, start=1):
         progress.progress(i / len(tickers), text=f"Scanning {ticker} ({i}/{len(tickers)})")
         try:
@@ -257,20 +305,28 @@ if run_button:
                 continue
             etf_flag = cached_is_etf(ticker)
             sector = "ETF" if etf_flag else cached_sector(ticker)
-            res = ms.score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=etf_flag)
+            if not etf_flag and only_strong and strong_etfs_scan:
+                if not ms.stock_is_in_strong_sector(sector, sector_leaderboard_scan, strong_etfs_scan):
+                    skipped_weak += 1
+                    continue
+            res = ms.score_stock(ticker, df, sector, sector_leaderboard_scan, regime, is_etf=etf_flag)
             (etf_results if etf_flag else stock_results).append(res)
         except Exception as e:
             st.warning(f"Skipped {ticker}: {e}")
     progress.empty()
 
+    if only_strong and skipped_weak:
+        st.caption(f"ℹ️ Skipped {skipped_weak} stocks outside the currently-strong sectors "
+                   "(uncheck the sidebar option to include them).")
+
     if not stock_results and not etf_results:
-        st.error("No results returned. Check your tickers and try again.")
+        st.error("No results returned. Check your tickers/filters and try again.")
         st.stop()
 
     display_cols = ["Ticker", "Score", "Sector", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
     money_cols = ["Price", "StopLoss", "Target", "R:R"]
 
-    def render_results(results, title, icon, csv_name):
+    def render_results(results, title, icon, csv_name, show_rs_chart=False):
         if not results:
             return
         df_out = pd.DataFrame(results).sort_values("Score", ascending=False).head(top_n)
@@ -299,13 +355,17 @@ if run_button:
                 st.markdown("**Why it scored this way:**")
                 for r in row["Reasons"]:
                     st.markdown(f'<div class="reason-item">• {r}</div>', unsafe_allow_html=True)
+                if show_rs_chart:
+                    st.markdown("**Relative strength vs. SPY:**")
+                    stock_df = cached_history(row["Ticker"])
+                    render_relative_strength_chart(row["Ticker"], stock_df)
 
         csv = df_out.assign(Reasons=df_out["Reasons"].apply(lambda r: " | ".join(r))).to_csv(index=False).encode("utf-8-sig")
         st.download_button(f"⬇️ Download {title} CSV", csv, csv_name, "text/csv",
                             use_container_width=True, key=csv_name)
 
-    render_results(stock_results, "Stocks", "📈", "screener_results_stocks.csv")
-    render_results(etf_results, "ETFs", "🧺", "screener_results_etfs.csv")
+    render_results(stock_results, "Stocks", "📈", "screener_results_stocks.csv", show_rs_chart=True)
+    render_results(etf_results, "ETFs", "🧺", "screener_results_etfs.csv", show_rs_chart=False)
 
 else:
     st.info("Set your tickers in the sidebar and click **Run scan**.")
