@@ -345,11 +345,16 @@ def get_sector_leaderboard():
             spy_ret = spy_close.iloc[-1] / spy_close.iloc[-n] - 1
             return (stock_ret - spy_ret) * 100  # percentage points vs SPY
 
+        last_price = float(close.iloc[-1])
+        day_change_pct = float((close.iloc[-1] / close.iloc[-2] - 1) * 100) if len(close) >= 2 else np.nan
+
         results[etf] = {
             "1w": rel_perf(5),
             "1m": rel_perf(21),
             "3m": rel_perf(63),
             "12m": rel_perf(252),
+            "price": last_price,
+            "day_change_pct": day_change_pct,
         }
 
     # rank sectors by average of 1m + 3m relative strength (medium-term leadership)
@@ -376,6 +381,37 @@ def summarize_sector_strength(sector_leaderboard):
     strong = [(info["sector"], etf) for etf, info in ranked[:top_cut]]
     weak = [(info["sector"], etf) for etf, info in ranked[bottom_cut:]]
     return strong, weak
+
+
+def strong_sector_etfs(sector_leaderboard):
+    """Return the set of ETF tickers representing the currently-strong
+    sectors (top third of the leaderboard). Comparing by ETF ticker (not
+    sector name string) sidesteps GICS naming variants like 'Telecommunication
+    Services' vs 'Communication Services' referring to the same sector."""
+    strong, _ = summarize_sector_strength(sector_leaderboard)
+    return {etf for _, etf in strong}
+
+
+def stock_is_in_strong_sector(sector, sector_leaderboard, strong_etfs):
+    """True if this stock's sector maps to an ETF currently in the strong group."""
+    etf = SECTOR_ETFS.get(sector)
+    return etf is not None and etf in strong_etfs
+
+
+def get_relative_strength_series(ticker_df, spy_df, lookback=126):
+    """Build a normalized (rebased to 100) comparison series for a stock vs
+    SPY over the last `lookback` trading days, for a relative-strength chart.
+    Returns a DataFrame indexed by date with 'Stock' and 'SPY' columns, or
+    None if there isn't enough overlapping data."""
+    if ticker_df is None or spy_df is None:
+        return None
+    stock_close = ticker_df["Close"].tail(lookback)
+    spy_close = spy_df["Close"].tail(lookback)
+    combined = pd.DataFrame({"Stock": stock_close, "SPY": spy_close}).dropna()
+    if combined.empty:
+        return None
+    normalized = combined / combined.iloc[0] * 100
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +586,7 @@ def _fmt_price_cols(df):
     return out
 
 
-def run_scan(tickers, top_n=None):
+def run_scan(tickers, top_n=None, only_strong_sectors=True):
     print("Fetching intermarket regime (bonds/stocks/commodities/dollar)...")
     regime = get_intermarket_regime()
     print("Regime:", regime["description"])
@@ -559,10 +595,13 @@ def run_scan(tickers, top_n=None):
     sector_leaderboard = get_sector_leaderboard()
 
     strong, weak = summarize_sector_strength(sector_leaderboard)
+    strong_etfs = strong_sector_etfs(sector_leaderboard)
     print("\nSectors showing STRENGTH:", ", ".join(f"{s} ({e})" for s, e in strong) or "n/a")
     print("Sectors showing WEAKNESS:", ", ".join(f"{s} ({e})" for s, e in weak) or "n/a")
+    if only_strong_sectors and strong_etfs:
+        print("(Stock results are filtered to strong sectors only — pass only_strong_sectors=False to disable)")
 
-    stock_results, etf_results = [], []
+    stock_results, etf_results, skipped_weak_sector = [], [], 0
     for i, ticker in enumerate(tickers, start=1):
         print(f"[{i}/{len(tickers)}] scanning {ticker}...", end="\r")
         try:
@@ -571,6 +610,10 @@ def run_scan(tickers, top_n=None):
                 continue
             etf_flag = is_etf(ticker)
             sector = "ETF" if etf_flag else get_sector(ticker)
+            if not etf_flag and only_strong_sectors and strong_etfs:
+                if not stock_is_in_strong_sector(sector, sector_leaderboard, strong_etfs):
+                    skipped_weak_sector += 1
+                    continue
             res = score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=etf_flag)
             (etf_results if etf_flag else stock_results).append(res)
         except Exception as e:
@@ -578,11 +621,14 @@ def run_scan(tickers, top_n=None):
             continue
 
     print()  # newline after progress
+    if only_strong_sectors and skipped_weak_sector:
+        print(f"Skipped {skipped_weak_sector} stocks outside the strong sectors.")
     if not stock_results and not etf_results:
         print("No results.")
         return
 
     display_cols = ["Ticker", "Score", "Sector", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
+
 
     def show_and_save(results, label, filename):
         if not results:
@@ -621,6 +667,9 @@ def parse_args():
     p.add_argument("--count", type=int, default=None,
                     help="Only scan the first N tickers from the chosen universe (default: all of them)")
     p.add_argument("--top", type=int, default=None, help="Only show/save top N results per list (stocks/ETFs)")
+    p.add_argument("--all-sectors", action="store_true",
+                    help="Include stocks from every sector, not just the currently-strong ones "
+                         "(by default, stock results are filtered to strong sectors only)")
     return p.parse_args()
 
 
@@ -634,4 +683,4 @@ if __name__ == "__main__":
     else:
         tickers = get_universe_tickers(args.universe, args.count)
 
-    run_scan(tickers, top_n=args.top)
+    run_scan(tickers, top_n=args.top, only_strong_sectors=not args.all_sectors)
