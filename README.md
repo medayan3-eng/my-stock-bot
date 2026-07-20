@@ -4,6 +4,28 @@ A **screener** (not an auto-trader). It scans a universe of stocks and/or ETFs, 
 0-100 using John Murphy's technical/intermarket principles plus candlestick confirmation, and
 explains in plain English why it scored that way. You decide what to trade.
 
+## Live home screen
+As soon as the app loads (before you click "Run scan"), you'll see:
+- The current **intermarket regime** (bonds/stocks/commodities/dollar trend directions).
+- The **sector leaderboard vs. SPY**, now including each sector ETF's **live price** and **today's %
+  change**, plus 1w/1m/3m/12m relative strength. This refreshes every 5 minutes.
+- **Sectors showing strength** / **Sectors showing weakness** — the top and bottom third of the
+  leaderboard.
+
+## Strong-sector filtering (on by default)
+Per Murphy's sector-rotation approach, the sidebar has a checkbox **"Only show stocks from
+currently-strong sectors"** (checked by default). When on, any stock whose sector isn't in the
+top third of the leaderboard is skipped entirely — you only see candidates from sectors the market
+is currently favoring. This never filters ETFs (they don't have a comparable "sector" concept).
+Uncheck it to see every scanned stock regardless of its sector's relative strength.
+
+In the CLI, this is on by default too — pass `--all-sectors` to disable it.
+
+## Relative-strength chart
+Each stock's result card includes a line chart comparing that stock against SPY over the last ~6
+months, both rebased to start at 100. If the stock's line is above SPY's, it's outperforming the
+market over that window — a quick visual gut-check on top of the numeric score.
+
 ## Files
 | File | Purpose |
 |---|---|
