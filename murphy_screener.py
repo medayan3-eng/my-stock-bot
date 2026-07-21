@@ -205,6 +205,22 @@ def macd(close, fast=12, slow=26, signal=9):
     return macd_line, signal_line, hist
 
 
+def compute_beta(stock_close, spy_close, window=252):
+    """Beta of the stock vs. SPY, computed directly from daily returns
+    (covariance / variance) over the trailing `window` trading days —
+    no dependency on yfinance's often-stale/missing .info['beta'] field."""
+    stock_ret = stock_close.pct_change().dropna()
+    spy_ret = spy_close.pct_change().dropna()
+    combined = pd.concat([stock_ret, spy_ret], axis=1, join="inner").tail(window)
+    combined.columns = ["stock", "spy"]
+    if len(combined) < 30:
+        return np.nan
+    var = combined["spy"].var()
+    if not var or np.isnan(var):
+        return np.nan
+    return float(combined["stock"].cov(combined["spy"]) / var)
+
+
 def is_bullish_engulfing(o, h, l, c):
     # last two candles: prior red, current green, current body engulfs prior body
     prev_o, prev_c = o.iloc[-2], c.iloc[-2]
@@ -418,12 +434,19 @@ def get_relative_strength_series(ticker_df, spy_df, lookback=126):
 # SCORING
 # ---------------------------------------------------------------------------
 
-def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False):
+def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False, spy_close=None):
     close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
 
     last_close = close.iloc[-1]
     reasons = []
     score = 0
+
+    beta = compute_beta(close, spy_close) if spy_close is not None else np.nan
+    if not np.isnan(beta):
+        if beta >= 1:
+            reasons.append(f"Beta={beta:.2f} — moves at least as much as the market (higher-beta profile)")
+        else:
+            reasons.append(f"Beta={beta:.2f} — moves less than the market (lower-beta/defensive profile)")
 
     # --- 1. 52-week trend template (25 pts) ---------------------------------
     ma50 = sma(close, 50)
@@ -448,11 +471,13 @@ def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False):
 
     # --- 2. Near-MA50 pullback opportunity on volume (10 pts) ---------------
     near_ma50_pts = 0
+    support_signal = False
     dist_from_ma50 = abs(last_close - ma50.iloc[-1]) / ma50.iloc[-1]
     avg_vol20 = vol.rolling(20).mean().iloc[-1]
     vol_today = vol.iloc[-1]
     if dist_from_ma50 <= NEAR_MA50_PCT and last_close >= ma50.iloc[-1] * 0.98:
         near_ma50_pts += 5
+        support_signal = True
         reasons.append("Price is hugging the 50-day MA — a possible support zone")
         if vol_today >= avg_vol20 * 1.3:
             near_ma50_pts += 5
@@ -462,25 +487,31 @@ def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False):
     # --- 3. Bollinger setup (10 pts) ----------------------------------------
     upper, mid, lower, width = bollinger_bands(close)
     bb_pts = 0
+    squeeze_signal = False
     width_percentile = (width.iloc[-1] <= width.rolling(120).quantile(0.2).iloc[-1])
     if width_percentile:
         bb_pts += 6
+        squeeze_signal = True
         reasons.append("Bollinger Bands are unusually narrow (squeeze) — a breakout may be brewing")
     if last_close <= lower.iloc[-1] * 1.02 and last_close > ma200.iloc[-1]:
         bb_pts += 4
+        support_signal = True
         reasons.append("Price is touching the lower Bollinger Band within an overall uptrend — possible buy zone")
     score += min(bb_pts, 10)
 
     # --- 4. Bullish candlestick (10 pts) ------------------------------------
     candle_hits = detect_bullish_candle(df)
+    candle_signal = bool(candle_hits)
     if candle_hits:
         score += 10
         reasons.append("Bullish candlestick detected: " + ", ".join(candle_hits))
 
     # --- 5. Unusual volume day (10 pts) -------------------------------------
     vol_pts = 0
+    volume_signal = False
     if avg_vol20 > 0 and vol_today >= avg_vol20 * VOLUME_SPIKE_MULT:
         vol_pts += 7
+        volume_signal = True
         reasons.append(f"Unusual volume today ({vol_today / avg_vol20:.1f}x the 20-day average) — possible large money flow")
         day_range = high.iloc[-1] - low.iloc[-1]
         if day_range > 0 and (last_close - low.iloc[-1]) / day_range >= 0.7:
@@ -559,10 +590,31 @@ def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False):
     reward = target - last_close
     rr_ratio = reward / risk if risk > 0 else np.nan
 
+    # --- Actionable setup classification -----------------------------------
+    # "Buy Zone": a concrete technical trigger is present right now (price at
+    # a support level, a bullish candle, or unusual volume).
+    # "Watchlist": no trigger yet, but the trend is strong or a squeeze is
+    # forming — worth monitoring over the next few days for a trigger.
+    # "No Signal": generic uptrend only, nothing actionable — filtered out
+    # by default so the list stays focused on real candidates.
+    if support_signal or candle_signal or volume_signal:
+        setup = "Buy Zone"
+        reasons.append("SETUP: Buy Zone — a concrete entry trigger is present right now "
+                        "(support test, bullish candle, and/or unusual volume)")
+    elif squeeze_signal or trend_pts >= 18:
+        setup = "Watchlist"
+        reasons.append("SETUP: Watchlist — strong trend/setup forming but no confirmed entry trigger yet; "
+                        "monitor over the next few days for a support test, candle, or volume confirmation")
+    else:
+        setup = "No Signal"
+        reasons.append("SETUP: No Signal — generic trend only, no actionable entry trigger found")
+
     return {
         "Ticker": ticker,
         "AssetType": "ETF" if is_etf else "Stock",
         "Sector": "ETF" if is_etf else sector,
+        "Setup": setup,
+        "Beta": round(beta, 2) if not np.isnan(beta) else None,
         "Score": round(score, 1),
         "Price": round(float(last_close), 2),
         "StopLoss": round(float(stop_loss), 2),
@@ -586,7 +638,10 @@ def _fmt_price_cols(df):
     return out
 
 
-def run_scan(tickers, top_n=None, only_strong_sectors=True):
+SETUP_SORT_ORDER = {"Buy Zone": 0, "Watchlist": 1, "No Signal": 2}
+
+
+def run_scan(tickers, top_n=None, only_strong_sectors=True, min_beta=1.0, only_actionable=True):
     print("Fetching intermarket regime (bonds/stocks/commodities/dollar)...")
     regime = get_intermarket_regime()
     print("Regime:", regime["description"])
@@ -600,8 +655,16 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True):
     print("Sectors showing WEAKNESS:", ", ".join(f"{s} ({e})" for s, e in weak) or "n/a")
     if only_strong_sectors and strong_etfs:
         print("(Stock results are filtered to strong sectors only — pass only_strong_sectors=False to disable)")
+    if min_beta is not None:
+        print(f"(Stocks below beta {min_beta} are filtered out — pass min_beta=None to disable)")
+    if only_actionable:
+        print("(Only 'Buy Zone' / 'Watchlist' setups are shown — pass only_actionable=False to include 'No Signal')")
 
-    stock_results, etf_results, skipped_weak_sector = [], [], 0
+    spy_df = fetch_history(BENCHMARK)
+    spy_close = spy_df["Close"] if spy_df is not None else None
+
+    stock_results, etf_results = [], []
+    skipped_weak_sector = skipped_beta = skipped_no_signal = 0
     for i, ticker in enumerate(tickers, start=1):
         print(f"[{i}/{len(tickers)}] scanning {ticker}...", end="\r")
         try:
@@ -614,7 +677,14 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True):
                 if not stock_is_in_strong_sector(sector, sector_leaderboard, strong_etfs):
                     skipped_weak_sector += 1
                     continue
-            res = score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=etf_flag)
+            res = score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=etf_flag, spy_close=spy_close)
+            if not etf_flag:
+                if min_beta is not None and res["Beta"] is not None and res["Beta"] < min_beta:
+                    skipped_beta += 1
+                    continue
+                if only_actionable and res["Setup"] == "No Signal":
+                    skipped_no_signal += 1
+                    continue
             (etf_results if etf_flag else stock_results).append(res)
         except Exception as e:
             print(f"\n  skipped {ticker}: {e}")
@@ -623,17 +693,25 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True):
     print()  # newline after progress
     if only_strong_sectors and skipped_weak_sector:
         print(f"Skipped {skipped_weak_sector} stocks outside the strong sectors.")
+    if min_beta is not None and skipped_beta:
+        print(f"Skipped {skipped_beta} stocks with beta below {min_beta}.")
+    if only_actionable and skipped_no_signal:
+        print(f"Skipped {skipped_no_signal} stocks with no actionable setup.")
     if not stock_results and not etf_results:
         print("No results.")
         return
 
-    display_cols = ["Ticker", "Score", "Sector", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
+    display_cols = ["Ticker", "Score", "Setup", "Sector", "Beta", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
 
+    def sort_key(df_):
+        return df_.assign(_s=df_["Setup"].map(SETUP_SORT_ORDER).fillna(9)).sort_values(
+            ["_s", "Score"], ascending=[True, False]).drop(columns="_s")
 
-    def show_and_save(results, label, filename):
+    def show_and_save(results, label, filename, sort_by_setup=False):
         if not results:
             return None
-        df_out = pd.DataFrame(results).sort_values("Score", ascending=False)
+        df_out = pd.DataFrame(results)
+        df_out = sort_key(df_out) if sort_by_setup else df_out.sort_values("Score", ascending=False)
         if top_n:
             df_out = df_out.head(top_n)
         print(f"\n=== {label} ===")
@@ -644,15 +722,15 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True):
         print(f"Saved full results (with explanations) to {filename}")
         return df_out
 
-    stocks_df = show_and_save(stock_results, "STOCKS", "screener_results_stocks.csv")
+    stocks_df = show_and_save(stock_results, "STOCKS", "screener_results_stocks.csv", sort_by_setup=True)
     etfs_df = show_and_save(etf_results, "ETFs", "screener_results_etfs.csv")
 
     if stocks_df is not None:
         print("\n=== Top 5 stocks — full explanation ===")
         for _, row in stocks_df.head(5).iterrows():
-            print(f"\n{row['Ticker']}  |  Score: {row['Score']}  |  Sector: {row['Sector']}")
+            print(f"\n{row['Ticker']}  |  Score: {row['Score']}  |  Setup: {row['Setup']}  |  Sector: {row['Sector']}")
             print(f"  Price: {row['Price']:.2f}  Stop-loss: {row['StopLoss']:.2f}  "
-                  f"Target: {row['Target']:.2f}  R:R: {row['R:R']}")
+                  f"Target: {row['Target']:.2f}  R:R: {row['R:R']}  Beta: {row['Beta']}")
             for r in row["Reasons"]:
                 print(f"   - {r}")
 
@@ -670,6 +748,12 @@ def parse_args():
     p.add_argument("--all-sectors", action="store_true",
                     help="Include stocks from every sector, not just the currently-strong ones "
                          "(by default, stock results are filtered to strong sectors only)")
+    p.add_argument("--min-beta", type=float, default=1.0,
+                    help="Minimum beta (vs. SPY) for a stock to be included. Default: 1.0. "
+                         "Use a negative number (e.g. -1) to disable beta filtering.")
+    p.add_argument("--all-setups", action="store_true",
+                    help="Include stocks with no actionable entry trigger ('No Signal'), not just "
+                         "'Buy Zone' / 'Watchlist' (by default, 'No Signal' stocks are filtered out)")
     return p.parse_args()
 
 
@@ -683,4 +767,6 @@ if __name__ == "__main__":
     else:
         tickers = get_universe_tickers(args.universe, args.count)
 
-    run_scan(tickers, top_n=args.top, only_strong_sectors=not args.all_sectors)
+    run_scan(tickers, top_n=args.top, only_strong_sectors=not args.all_sectors,
+              min_beta=(None if args.min_beta < 0 else args.min_beta),
+              only_actionable=not args.all_setups)
