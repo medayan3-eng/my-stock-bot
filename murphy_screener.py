@@ -43,11 +43,11 @@ VOLUME_SPIKE_MULT = 2.0      # today's volume vs 20d avg volume to count as "unu
 NEAR_MA50_PCT = 0.03         # "hugging the 50MA" = within 3%
 BREAKOUT_LOOKBACK = 20       # bars used to define "recent swing low" for stop-loss
 
-from sp_universe_data import SP500_DATA, SP400_DATA, SP600_DATA
+from sp_universe_data import SP500_DATA, SP400_DATA, SP600_DATA, EXTRA_TICKERS_DATA
 
-# Merge all three universes into one lookup (ticker -> (name, sector)).
+# Merge all universes into one lookup (ticker -> (name, sector)).
 # If a ticker somehow appears in more than one list, the S&P 500 entry wins.
-ALL_UNIVERSE_DATA = {**SP600_DATA, **SP400_DATA, **SP500_DATA}
+ALL_UNIVERSE_DATA = {**SP600_DATA, **SP400_DATA, **EXTRA_TICKERS_DATA, **SP500_DATA}
 
 # Common ETF tickers — used to classify a manually-entered ticker as an ETF
 # rather than an individual stock (index/sector/commodity/bond funds, etc.)
@@ -58,6 +58,7 @@ KNOWN_ETFS = {
     "TLT", "IEF", "SHY", "AGG", "BND", "LQD", "HYG", "TIP", "UUP", "FXE",
     "ARKK", "ARKG", "ARKW", "SOXX", "SMH", "XBI", "IBB", "KRE", "XOP", "XME",
     "VNQ", "IYR", "EFA", "EEM", "VWO", "FXI", "EWJ", "EWZ", "HYD",
+    "NASA",  # Tema Space Innovators ETF — not the space agency, not a stock
 }
 
 
@@ -93,6 +94,17 @@ INTERMARKET_TICKERS = {
 
 BENCHMARK = "SPY"
 
+# Live market snapshot: FX, individual commodities, bond proxy — shown on the
+# dashboard home screen as plain price + daily % change (not part of scoring).
+MARKET_SNAPSHOT_TICKERS = {
+    "USD/ILS": "ILS=X",
+    "Gold": "GC=F",
+    "Silver": "SI=F",
+    "Copper": "HG=F",
+    "Oil (WTI)": "CL=F",
+    "Bonds (TLT)": "TLT",
+}
+
 
 # ---------------------------------------------------------------------------
 # DATA FETCH
@@ -110,16 +122,56 @@ def fetch_history(ticker, period_days=LOOKBACK_DAYS):
     return df
 
 
+def get_market_snapshot():
+    """Fetch live price + today's % change for FX/commodities/bond proxy
+    tickers, for display on the dashboard home screen."""
+    snapshot = {}
+    for label, ticker in MARKET_SNAPSHOT_TICKERS.items():
+        df = fetch_history(ticker, period_days=30)
+        if df is None or len(df) < 2:
+            snapshot[label] = {"ticker": ticker, "price": None, "day_change_pct": None}
+            continue
+        close = df["Close"]
+        price = float(close.iloc[-1])
+        day_change_pct = float((close.iloc[-1] / close.iloc[-2] - 1) * 100)
+        snapshot[label] = {"ticker": ticker, "price": price, "day_change_pct": day_change_pct}
+    return snapshot
+
+
+def get_normalized_comparison(tickers, lookback=252):
+    """Build a normalized (rebased to 100) comparison DataFrame for an
+    arbitrary set of tickers, for a multi-line chart (e.g. SPY vs.
+    commodities/bonds/each sector). `tickers` is a dict label -> ticker.
+    Returns a DataFrame indexed by date, one column per label that had
+    enough data, or None if nothing could be built."""
+    series = {}
+    for label, ticker in tickers.items():
+        df = fetch_history(ticker, period_days=max(lookback + 30, LOOKBACK_DAYS))
+        if df is None:
+            continue
+        close = df["Close"].tail(lookback)
+        series[label] = close
+    if not series:
+        return None
+    combined = pd.DataFrame(series).dropna()
+    if combined.empty:
+        return None
+    normalized = combined / combined.iloc[0] * 100
+    return normalized
+
+
 UNIVERSE_MAP = {
     "sp500": SP500_DATA,
     "sp400": SP400_DATA,
     "sp600": SP600_DATA,
+    "watchlist": EXTRA_TICKERS_DATA,
 }
 
 
 def get_universe_tickers(universe="sp500", n=None):
     """Return ticker symbols for a given universe.
-    universe: "sp500" | "sp400" | "sp600" | "all" (large + mid + small cap combined)
+    universe: "sp500" | "sp400" | "sp600" | "watchlist" (curated extra ADRs/tickers)
+              | "all" (large + mid + small cap combined)
     Pass n to get only the first n tickers (quick partial scan); omit n for the full list.
     """
     if universe == "all":
