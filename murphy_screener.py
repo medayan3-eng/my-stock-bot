@@ -39,7 +39,8 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 LOOKBACK_DAYS = 400          # trading days of history to pull (covers 52w + 200MA warmup)
-VOLUME_SPIKE_MULT = 2.0      # today's volume vs 20d avg volume to count as "unusual"
+VOLUME_SPIKE_MULT = 2.0      # today's volume vs 20d avg volume to count as "unusual" (scoring bonus)
+RECENT_VOLUME_SPIKE_MULT = 1.5   # today OR yesterday's volume vs 20d avg — a separate, more sensitive flag/filter
 NEAR_MA50_PCT = 0.03         # "hugging the 50MA" = within 3%
 BREAKOUT_LOOKBACK = 20       # bars used to define "recent swing low" for stop-loss
 
@@ -527,6 +528,21 @@ def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False, sp
     dist_from_ma50 = abs(last_close - ma50.iloc[-1]) / ma50.iloc[-1]
     avg_vol20 = vol.rolling(20).mean().iloc[-1]
     vol_today = vol.iloc[-1]
+    vol_yesterday = vol.iloc[-2] if len(vol) >= 2 else np.nan
+
+    # Recent volume spike (today OR yesterday >= 1.5x the 20-day average) —
+    # a standalone, more sensitive signal separate from the scoring bonus below.
+    ratio_today = vol_today / avg_vol20 if avg_vol20 > 0 else np.nan
+    ratio_yesterday = vol_yesterday / avg_vol20 if avg_vol20 > 0 and not np.isnan(vol_yesterday) else np.nan
+    if np.isnan(ratio_yesterday) or (not np.isnan(ratio_today) and ratio_today >= ratio_yesterday):
+        volume_spike_ratio, volume_spike_day = ratio_today, "Today"
+    else:
+        volume_spike_ratio, volume_spike_day = ratio_yesterday, "Yesterday"
+    volume_spike_flag = (not np.isnan(volume_spike_ratio)) and volume_spike_ratio >= RECENT_VOLUME_SPIKE_MULT
+    if volume_spike_flag:
+        reasons.append(f"Volume spike: {volume_spike_ratio:.1f}x the 20-day average volume "
+                        f"({volume_spike_day}) — meets the 1.5x threshold, a strong potential-move indicator")
+
     if dist_from_ma50 <= NEAR_MA50_PCT and last_close >= ma50.iloc[-1] * 0.98:
         near_ma50_pts += 5
         support_signal = True
@@ -649,7 +665,7 @@ def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False, sp
     # forming — worth monitoring over the next few days for a trigger.
     # "No Signal": generic uptrend only, nothing actionable — filtered out
     # by default so the list stays focused on real candidates.
-    if support_signal or candle_signal or volume_signal:
+    if support_signal or candle_signal or volume_signal or volume_spike_flag:
         setup = "Buy Zone"
         reasons.append("SETUP: Buy Zone — a concrete entry trigger is present right now "
                         "(support test, bullish candle, and/or unusual volume)")
@@ -667,6 +683,9 @@ def score_stock(ticker, df, sector, sector_leaderboard, regime, is_etf=False, sp
         "Sector": "ETF" if is_etf else sector,
         "Setup": setup,
         "Beta": round(beta, 2) if not np.isnan(beta) else None,
+        "VolumeSpike": bool(volume_spike_flag),
+        "VolumeSpikeRatio": round(float(volume_spike_ratio), 2) if not np.isnan(volume_spike_ratio) else None,
+        "VolumeSpikeDay": volume_spike_day if volume_spike_flag else None,
         "Score": round(score, 1),
         "Price": round(float(last_close), 2),
         "StopLoss": round(float(stop_loss), 2),
@@ -693,7 +712,8 @@ def _fmt_price_cols(df):
 SETUP_SORT_ORDER = {"Buy Zone": 0, "Watchlist": 1, "No Signal": 2}
 
 
-def run_scan(tickers, top_n=None, only_strong_sectors=True, min_beta=1.0, only_actionable=True):
+def run_scan(tickers, top_n=None, only_strong_sectors=True, min_beta=1.0, only_actionable=True,
+             require_volume_spike=False):
     print("Fetching intermarket regime (bonds/stocks/commodities/dollar)...")
     regime = get_intermarket_regime()
     print("Regime:", regime["description"])
@@ -711,12 +731,14 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True, min_beta=1.0, only_a
         print(f"(Stocks below beta {min_beta} are filtered out — pass min_beta=None to disable)")
     if only_actionable:
         print("(Only 'Buy Zone' / 'Watchlist' setups are shown — pass only_actionable=False to include 'No Signal')")
+    if require_volume_spike:
+        print(f"(Only stocks with volume >= {RECENT_VOLUME_SPIKE_MULT}x average today or yesterday are shown)")
 
     spy_df = fetch_history(BENCHMARK)
     spy_close = spy_df["Close"] if spy_df is not None else None
 
     stock_results, etf_results = [], []
-    skipped_weak_sector = skipped_beta = skipped_no_signal = 0
+    skipped_weak_sector = skipped_beta = skipped_no_signal = skipped_no_vol_spike = 0
     for i, ticker in enumerate(tickers, start=1):
         print(f"[{i}/{len(tickers)}] scanning {ticker}...", end="\r")
         try:
@@ -737,6 +759,9 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True, min_beta=1.0, only_a
                 if only_actionable and res["Setup"] == "No Signal":
                     skipped_no_signal += 1
                     continue
+                if require_volume_spike and not res["VolumeSpike"]:
+                    skipped_no_vol_spike += 1
+                    continue
             (etf_results if etf_flag else stock_results).append(res)
         except Exception as e:
             print(f"\n  skipped {ticker}: {e}")
@@ -749,11 +774,14 @@ def run_scan(tickers, top_n=None, only_strong_sectors=True, min_beta=1.0, only_a
         print(f"Skipped {skipped_beta} stocks with beta below {min_beta}.")
     if only_actionable and skipped_no_signal:
         print(f"Skipped {skipped_no_signal} stocks with no actionable setup.")
+    if require_volume_spike and skipped_no_vol_spike:
+        print(f"Skipped {skipped_no_vol_spike} stocks without a {RECENT_VOLUME_SPIKE_MULT}x+ volume spike.")
     if not stock_results and not etf_results:
         print("No results.")
         return
 
-    display_cols = ["Ticker", "Score", "Setup", "Sector", "Beta", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
+    display_cols = ["Ticker", "Score", "Setup", "Sector", "Beta", "VolumeSpikeRatio", "VolumeSpikeDay",
+                     "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
 
     def sort_key(df_):
         return df_.assign(_s=df_["Setup"].map(SETUP_SORT_ORDER).fillna(9)).sort_values(
@@ -806,6 +834,9 @@ def parse_args():
     p.add_argument("--all-setups", action="store_true",
                     help="Include stocks with no actionable entry trigger ('No Signal'), not just "
                          "'Buy Zone' / 'Watchlist' (by default, 'No Signal' stocks are filtered out)")
+    p.add_argument("--require-volume-spike", action="store_true",
+                    help="Only include stocks whose volume today OR yesterday was at least "
+                         f"{RECENT_VOLUME_SPIKE_MULT}x the 20-day average (off by default)")
     return p.parse_args()
 
 
@@ -821,4 +852,5 @@ if __name__ == "__main__":
 
     run_scan(tickers, top_n=args.top, only_strong_sectors=not args.all_sectors,
               min_beta=(None if args.min_beta < 0 else args.min_beta),
-              only_actionable=not args.all_setups)
+              only_actionable=not args.all_setups,
+              require_volume_spike=args.require_volume_spike)
