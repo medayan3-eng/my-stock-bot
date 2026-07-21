@@ -338,6 +338,12 @@ with st.sidebar:
              "in the next few days. Unchecking this also shows generic trending stocks with no trigger at all.",
     )
 
+    require_volume_spike = st.checkbox(
+        "Only show stocks with a volume spike (≥1.5x avg, today or yesterday)", value=False,
+        help="A strong potential-move indicator: today's OR yesterday's volume was at least 1.5x the "
+             "20-day average. Off by default — turn on to focus specifically on volume-confirmed names.",
+    )
+
     top_n = st.slider("Number of results to show (per list)", 5, 50, 20)
     run_button = st.button("🔍 Run scan", type="primary", use_container_width=True)
 
@@ -379,7 +385,7 @@ with tab_home:
         st.markdown(f'<div class="section-title">📋 Scan Results ({len(tickers)} tickers)</div>', unsafe_allow_html=True)
         progress = st.progress(0.0, text="Starting scan...")
         stock_results, etf_results = [], []
-        skipped_weak = skipped_beta = skipped_no_signal = 0
+        skipped_weak = skipped_beta = skipped_no_signal = skipped_no_vol_spike = 0
         for i, ticker in enumerate(tickers, start=1):
             progress.progress(i / len(tickers), text=f"Scanning {ticker} ({i}/{len(tickers)})")
             try:
@@ -401,6 +407,9 @@ with tab_home:
                     if only_actionable and res["Setup"] == "No Signal":
                         skipped_no_signal += 1
                         continue
+                    if require_volume_spike and not res["VolumeSpike"]:
+                        skipped_no_vol_spike += 1
+                        continue
                 (etf_results if etf_flag else stock_results).append(res)
             except Exception as e:
                 st.warning(f"Skipped {ticker}: {e}")
@@ -413,6 +422,8 @@ with tab_home:
             filter_notes.append(f"{skipped_beta} with beta below {effective_min_beta}")
         if only_actionable and skipped_no_signal:
             filter_notes.append(f"{skipped_no_signal} with no actionable setup")
+        if require_volume_spike and skipped_no_vol_spike:
+            filter_notes.append(f"{skipped_no_vol_spike} without a {ms.RECENT_VOLUME_SPIKE_MULT}x+ volume spike")
         if filter_notes:
             st.caption("ℹ️ Skipped " + "; ".join(filter_notes) + " (adjust the sidebar filters to include them).")
 
@@ -420,7 +431,8 @@ with tab_home:
             st.error("No results returned. Check your tickers/filters and try again.")
             st.stop()
 
-        display_cols = ["Ticker", "Score", "Setup", "Sector", "Beta", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
+        display_cols = ["Ticker", "Score", "Setup", "Sector", "Beta", "VolumeSpikeRatio", "VolumeSpikeDay",
+                         "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
         money_cols = ["Price", "StopLoss", "Target", "R:R"]
         SETUP_SORT_ORDER = {"Buy Zone": 0, "Watchlist": 1, "No Signal": 2}
 
@@ -442,6 +454,7 @@ with tab_home:
             st.markdown(f'<div class="section-title">{icon} {title} ({len(results)} found)</div>', unsafe_allow_html=True)
             format_map = {c: "{:.2f}" for c in money_cols}
             format_map["Beta"] = "{:.2f}"
+            format_map["VolumeSpikeRatio"] = "{:.2f}"
             st.dataframe(
                 df_out[display_cols]
                 .style.background_gradient(subset=["Score"], cmap="RdYlGn", vmin=0, vmax=100)
@@ -454,12 +467,13 @@ with tab_home:
                 header = f"{row['Ticker']} — {row['Sector']}"
                 with st.expander(header):
                     beta_txt = f"Beta {row['Beta']:.2f}" if row["Beta"] is not None else "Beta n/a"
-                    st.markdown(
-                        f'{score_badge(row["Score"])} &nbsp; {setup_badge(row["Setup"])} &nbsp; '
-                        f'<span class="sector-chip">{row["Sector"]}</span> &nbsp; '
-                        f'<span class="sector-chip">{beta_txt}</span>',
-                        unsafe_allow_html=True,
-                    )
+                    badges = (f'{score_badge(row["Score"])} &nbsp; {setup_badge(row["Setup"])} &nbsp; '
+                              f'<span class="sector-chip">{row["Sector"]}</span> &nbsp; '
+                              f'<span class="sector-chip">{beta_txt}</span>')
+                    if row.get("VolumeSpike"):
+                        badges += (f' &nbsp; <span class="sector-chip">🔊 {row["VolumeSpikeRatio"]:.1f}x '
+                                   f'volume ({row["VolumeSpikeDay"]})</span>')
+                    st.markdown(badges, unsafe_allow_html=True)
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Price", f"{row['Price']:.2f}")
                     c2.metric("Stop-loss", f"{row['StopLoss']:.2f}")
