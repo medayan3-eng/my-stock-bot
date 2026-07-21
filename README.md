@@ -47,6 +47,22 @@ By default, **"No Signal" stocks are filtered out** (sidebar checkbox "Only show
 on by default) so the list stays focused on real candidates — either ready now, or worth watching
 this week. In the CLI: pass `--all-setups` to include "No Signal" stocks too.
 
+## Live market snapshot & charts tab
+The Home tab now opens with a **Live Market Snapshot**: USD/ILS, Gold, Silver, Copper, Oil (WTI),
+and the Bonds (TLT) proxy — each with live price and today's % change, refreshed every 5 minutes.
+
+A separate **📊 Charts** tab has:
+- SPY vs. Commodities (DBC) vs. Bonds (TLT) vs. Dollar (UUP), all rebased to 100.
+- SPY vs. every sector SPDR ETF at once, all rebased to 100.
+- A dropdown to pick one sector and see it plotted against SPY on its own for a closer look.
+
+## My Watchlist universe
+A curated list of tickers is now built in as its own universe option (**"My Watchlist (global ADRs)"**
+in the sidebar, or `--universe watchlist` in the CLI): major healthcare/financial/energy ADRs (Novartis,
+Novo Nordisk, Sanofi, HSBC, Barclays, Santander, Tenaris, Equinor, Petrobras, etc.) plus SLS (SELLAS
+Life Sciences). Note: the ticker "NASA" is not a stock — it's the Tema Space Innovators ETF — so it's
+classified and scanned as an ETF, not a stock.
+
 ## Files
 | File | Purpose |
 |---|---|
