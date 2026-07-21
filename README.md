@@ -63,6 +63,18 @@ Novo Nordisk, Sanofi, HSBC, Barclays, Santander, Tenaris, Equinor, Petrobras, et
 Life Sciences). Note: the ticker "NASA" is not a stock — it's the Tema Space Innovators ETF — so it's
 classified and scanned as an ETF, not a stock.
 
+## Volume spike indicator (≥1.5x average, today or yesterday)
+A separate, more sensitive signal from the "unusual volume" scoring bonus (which uses 2x and only
+looks at today): every stock also gets a **VolumeSpike** flag if EITHER today's or yesterday's volume
+was at least **1.5x** the 20-day average — a strong potential-move indicator on its own. It shows up as:
+- A `VolumeSpikeRatio` / `VolumeSpikeDay` column in the results table (e.g. "1.7x — Yesterday").
+- A 🔊 badge on the per-ticker card.
+- A reason line explaining it.
+- It also counts as a trigger for the "Buy Zone" setup classification.
+
+By default this is just informational. Check the sidebar box **"Only show stocks with a volume spike
+(≥1.5x avg, today or yesterday)"** to filter down to only those names. In the CLI: `--require-volume-spike`.
+
 ## Files
 | File | Purpose |
 |---|---|
