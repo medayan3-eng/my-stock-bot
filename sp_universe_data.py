@@ -1523,3 +1523,40 @@ SP600_DATA = {
     "ZD": ("Ziff Davis", "Communication Services"),
     "ZWS": ("Zurn Elkay Water Solutions Corp. and announced", "Industrials"),
 }
+
+# Extra tickers explicitly requested — mostly foreign ADRs (finviz screens for
+# Healthcare/Financial/Energy sector ADRs) plus a couple of specific symbols.
+# Not part of the S&P 500/400/600, but included so they're always available
+# for scanning without relying on a live sector lookup.
+EXTRA_TICKERS_DATA = {
+    # Healthcare ADRs
+    "NVS": ("Novartis AG ADR", "Health Care"),
+    "NVO": ("Novo Nordisk ADR", "Health Care"),
+    "SNY": ("Sanofi ADR", "Health Care"),
+    "SNN": ("Smith & Nephew plc ADR", "Health Care"),
+    "PHG": ("Koninklijke Philips NV ADR", "Health Care"),
+    "TAK": ("Takeda Pharmaceutical Co ADR", "Health Care"),
+    # Financial ADRs
+    "HSBC": ("HSBC Holdings plc ADR", "Financials"),
+    "ING": ("ING Groep NV ADR", "Financials"),
+    "PUK": ("Prudential plc ADR", "Financials"),
+    "BCS": ("Barclays plc ADR", "Financials"),
+    "SMFG": ("Sumitomo Mitsui Financial Group Inc ADR", "Financials"),
+    "DXYZ": ("Destiny Tech100 Inc", "Financials"),
+    "BBVA": ("Banco Bilbao Vizcaya Argentaria SA ADR", "Financials"),
+    "MUFG": ("Mitsubishi UFJ Financial Group Inc ADR", "Financials"),
+    "NWG": ("NatWest Group Plc ADR", "Financials"),
+    "SAN": ("Banco Santander SA ADR", "Financials"),
+    "MFG": ("Mizuho Financial Group Inc ADR", "Financials"),
+    "AAC-U": ("Ares Acquisition Corp III", "Financials"),
+    # Energy ADRs
+    "TS": ("Tenaris SA ADR", "Energy"),
+    "EQNR": ("Equinor ASA ADR", "Energy"),
+    "EC": ("Ecopetrol SA ADR", "Energy"),
+    "PBR-A": ("Petroleo Brasileiro SA Petrobras ADR", "Energy"),
+    # Individually requested tickers
+    "SLS": ("SELLAS Life Sciences Group", "Health Care"),
+    # Note: NASA is NOT an individual stock — it's the ticker for the Tema
+    # Space Innovators ETF, so it's added to KNOWN_ETFS in murphy_screener.py
+    # instead of here.
+}
