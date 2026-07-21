@@ -26,6 +26,27 @@ Each stock's result card includes a line chart comparing that stock against SPY 
 months, both rebased to start at 100. If the stock's line is above SPY's, it's outperforming the
 market over that window — a quick visual gut-check on top of the numeric score.
 
+## Beta filter
+Each stock's beta (vs. SPY) is computed directly from its own 1-year daily-return history (covariance
+÷ SPY variance) — not pulled from an external/stale data field. The sidebar has a **"Filter by minimum
+beta"** checkbox (on by default) with a slider, default **1.0**. Stocks below that beta are excluded
+so the results aren't dominated by low-volatility defensive names when a defensive sector happens to
+rank as "strong." ETFs are never filtered by beta. In the CLI: `--min-beta 1.0` (default), or a
+negative value to disable, e.g. `--min-beta -1`.
+
+## Actionable setup classification (Buy Zone / Watchlist / No Signal)
+A high trend/momentum score alone doesn't mean there's anything to actually *do* right now. Every
+stock is classified into one of three setup tiers, and stock results are sorted with Buy Zone first:
+- **🟢 Buy Zone** — a concrete entry trigger is present right now: a support test (50-MA or lower
+  Bollinger Band touch), a bullish candlestick, and/or unusual volume.
+- **🟡 Watchlist** — no confirmed trigger yet, but the trend is strong or a Bollinger squeeze is
+  forming. Worth monitoring over the next few days for a trigger before entering.
+- **⚪ No Signal** — a generic uptrend with no actionable trigger at all.
+
+By default, **"No Signal" stocks are filtered out** (sidebar checkbox "Only show actionable setups",
+on by default) so the list stays focused on real candidates — either ready now, or worth watching
+this week. In the CLI: pass `--all-setups` to include "No Signal" stocks too.
+
 ## Files
 | File | Purpose |
 |---|---|
@@ -88,6 +109,10 @@ sector-leadership and macro-regime alignment don't apply to a fund)
 Every ticker also gets a **stop-loss** (below the nearest support / 50-MA, whichever is lower) and a
 **price target** (roughly a 2.5x reward-to-risk multiple, or the 52-week high if higher). Price,
 stop-loss, target and R:R are always displayed to 2 decimal places.
+
+**Beta and the actionable-setup tier (Buy Zone/Watchlist/No Signal) are not part of the 0-100 score
+itself** — they're used as pre-filters (see below) so the ranked list only contains stocks that both
+score well *and* pass your beta/setup criteria.
 
 ## Sector strength / weakness summary
 After building the sector relative-strength leaderboard (1w/1m/3m/12m vs. SPY, per Murphy's
