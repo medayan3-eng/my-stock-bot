@@ -189,11 +189,18 @@ UNIVERSE_MAP = {
 def get_universe_tickers(universe="sp500", n=None):
     """Return ticker symbols for a given universe.
     universe: "sp500" | "sp400" | "sp600" | "watchlist" (curated extra ADRs/tickers)
-              | "all" (large + mid + small cap combined)
+              | "all" (S&P 500 + 400 + 600 + the watchlist, combined)
     Pass n to get only the first n tickers (quick partial scan); omit n for the full list.
     """
     if universe == "all":
-        all_tickers = list(SP500_DATA.keys()) + list(SP400_DATA.keys()) + list(SP600_DATA.keys())
+        combined = (list(SP500_DATA.keys()) + list(SP400_DATA.keys()) +
+                    list(SP600_DATA.keys()) + list(EXTRA_TICKERS_DATA.keys()))
+        seen = set()
+        all_tickers = []
+        for t in combined:
+            if t not in seen:
+                seen.add(t)
+                all_tickers.append(t)
     else:
         table = UNIVERSE_MAP.get(universe, SP500_DATA)
         all_tickers = list(table.keys())
@@ -201,6 +208,28 @@ def get_universe_tickers(universe="sp500", n=None):
         return all_tickers
     n = max(1, min(int(n), len(all_tickers)))
     return all_tickers[:n]
+
+
+def get_random_tickers(n=100, universe="all"):
+    """Return n tickers chosen uniformly at random from the given universe.
+    Uses a fresh random draw every call — intentionally NOT cached/memoized,
+    so each scan run gets a genuinely different random sample."""
+    import random
+    all_tickers = get_universe_tickers(universe)
+    n = max(1, min(int(n), len(all_tickers)))
+    return random.sample(all_tickers, n)
+
+
+def build_count_steps(total, step=50):
+    """Build a clean list of step values for a 'how many tickers' slider:
+    50, 100, 150, ... up to `total`, always ending exactly on `total` even
+    if it isn't a multiple of `step` (e.g. for 505: ...,450,505)."""
+    if total <= step:
+        return [total]
+    steps = list(range(step, total + 1, step))
+    if steps[-1] != total:
+        steps.append(total)
+    return steps
 
 
 def get_sp500_tickers(n=None):
