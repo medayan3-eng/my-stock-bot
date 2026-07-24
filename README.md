@@ -26,13 +26,12 @@ Each stock's result card includes a line chart comparing that stock against SPY 
 months, both rebased to start at 100. If the stock's line is above SPY's, it's outperforming the
 market over that window — a quick visual gut-check on top of the numeric score.
 
-## Beta filter
+## Beta (informational, no dashboard filter)
 Each stock's beta (vs. SPY) is computed directly from its own 1-year daily-return history (covariance
-÷ SPY variance) — not pulled from an external/stale data field. The sidebar has a **"Filter by minimum
-beta"** checkbox (on by default) with a slider, default **1.0**. Stocks below that beta are excluded
-so the results aren't dominated by low-volatility defensive names when a defensive sector happens to
-rank as "strong." ETFs are never filtered by beta. In the CLI: `--min-beta 1.0` (default), or a
-negative value to disable, e.g. `--min-beta -1`.
+÷ SPY variance) — not pulled from an external/stale data field. It's shown as a column and on each
+stock's card so you can factor it into your own decision, but it no longer filters results in the
+dashboard. (The CLI still supports `--min-beta` if you want that filter there: default 1.0, or a
+negative value to disable, e.g. `--min-beta -1`.)
 
 ## Actionable setup classification (Buy Zone / Watchlist / No Signal)
 A high trend/momentum score alone doesn't mean there's anything to actually *do* right now. Every
@@ -57,11 +56,27 @@ A separate **📊 Charts** tab has:
 - A dropdown to pick one sector and see it plotted against SPY on its own for a closer look.
 
 ## My Watchlist universe
-A curated list of tickers is now built in as its own universe option (**"My Watchlist (global ADRs)"**
+A curated list of ~100 tickers is built in as its own universe option (**"My Watchlist (global ADRs)"**
 in the sidebar, or `--universe watchlist` in the CLI): major healthcare/financial/energy ADRs (Novartis,
-Novo Nordisk, Sanofi, HSBC, Barclays, Santander, Tenaris, Equinor, Petrobras, etc.) plus SLS (SELLAS
-Life Sciences). Note: the ticker "NASA" is not a stock — it's the Tema Space Innovators ETF — so it's
-classified and scanned as an ETF, not a stock.
+Novo Nordisk, Sanofi, HSBC, Barclays, Santander, Tenaris, Equinor, Petrobras, etc.), SLS (SELLAS Life
+Sciences), and a broad batch of mid/large-cap names spanning tech, industrials, biotech and more. Note:
+the ticker "NASA" is not a stock — it's the Tema Space Innovators ETF — so it's classified and scanned
+as an ETF, not a stock.
+
+## Choosing what to scan
+The dashboard sidebar only has the index-based selector now (no separate manual-ticker-entry mode).
+**"Which index?"** options:
+- **S&P 500 / S&P 400 / S&P 600** — large/mid/small-cap, individually
+- **My Watchlist (global ADRs)** — the curated list above
+- **All combined (500+400+600+Watchlist)** — every universe merged and de-duplicated (~1,555 tickers)
+- **🎲 Random 100 (from All combined)** — scans 100 tickers chosen completely at random from the full
+  combined universe. A fresh random set is drawn **every time you click Run scan** — never cached,
+  never the same 100 twice in a row. Useful for spot-checking the screener against names you wouldn't
+  normally think to look at.
+
+For the index-based options (not Random 100), the "how many tickers to scan" slider moves in clean
+steps of 50 (50, 100, 150, ...) and always includes the exact total as the last step so you can close
+the gap (e.g. for 505 tickers: ...400, 450, 500, 505). The "results to show" slider steps by 5, up to 50.
 
 ## Volume spike indicator (≥1.5x average, today or yesterday)
 A separate, more sensitive signal from the "unusual volume" scoring bonus (which uses 2x and only
@@ -112,8 +127,8 @@ ETFs** — and saves them to separate CSVs (`screener_results_stocks.csv` / `scr
 - **All combined** — all three merged (~1,500 tickers)
 
 In the dashboard, pick an index and use the slider to scan any count from 1 up to the full size of
-that universe, or switch to "Manual list" to type your own tickers (stocks and ETFs both work —
-ETFs are auto-detected and routed to the ETF list).
+that universe (in steps of 50), or pick "🎲 Random 100" to scan a fresh random sample every run. The
+CLI still accepts explicit tickers or `--file` if you want to type/paste your own list there.
 
 ## Deploy on Streamlit Cloud
 1. Push all four files to your GitHub repo (root of the `main` branch).
@@ -139,8 +154,8 @@ Every ticker also gets a **stop-loss** (below the nearest support / 50-MA, which
 stop-loss, target and R:R are always displayed to 2 decimal places.
 
 **Beta and the actionable-setup tier (Buy Zone/Watchlist/No Signal) are not part of the 0-100 score
-itself** — they're used as pre-filters (see below) so the ranked list only contains stocks that both
-score well *and* pass your beta/setup criteria.
+itself.** The setup tier is used as a pre-filter in the dashboard (on by default); beta is shown as
+informational context only there (the CLI still offers `--min-beta` as an optional filter).
 
 ## Sector strength / weakness summary
 After building the sector relative-strength leaderboard (1w/1m/3m/12m vs. SPY, per Murphy's
@@ -154,7 +169,7 @@ Use this to decide where to focus your scan before drilling into individual name
 - The app fetches live data via `yfinance` — it needs internet access at run time.
 - The embedded S&P 500/400/600 lists (in `sp_universe_data.py`) are static snapshots; some tickers
   may have since been added/removed from an index. Edit that file directly, or pass your own list
-  with `--file` / the manual-list mode in the dashboard.
+  with `--file` (CLI) if you want a custom set.
 - ETF classification: any ticker in the embedded S&P 500/400/600 data is treated as a stock. Anything
   else is checked against a built-in list of common ETFs (SPY, QQQ, sector SPDRs, GLD, TLT, etc.);
   if still unmatched, a live yfinance lookup checks the `quoteType`.
