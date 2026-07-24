@@ -198,8 +198,13 @@ with tab_home:
     st.markdown(f'<div class="card">{regime["description"]}</div>', unsafe_allow_html=True)
     trend_cols = st.columns(4)
     arrow_map = {"up": "🟢 Rising", "down": "🔴 Falling", "flat": "⚪ Flat", "unknown": "❓ Unknown"}
+    trends_pct = regime.get("trends_pct", {})
     for col, (name, trend) in zip(trend_cols, regime["trends"].items()):
-        col.metric(name, arrow_map.get(trend, trend))
+        pct = trends_pct.get(name)
+        delta = f"{pct:+.2f}% (20d)" if pct is not None else None
+        col.metric(name, arrow_map.get(trend, trend), delta=delta)
+    st.caption("Direction compares each proxy's 60-day moving average to itself 20 trading days ago. "
+               "'Flat' means that move was smaller than ±0.5% — a genuinely quiet trend, not missing data.")
 
     st.markdown('<div class="section-title">🏭 Sector Leaderboard (vs. SPY)</div>', unsafe_allow_html=True)
     with st.spinner("Building sector relative-strength leaderboard..."):
