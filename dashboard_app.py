@@ -303,23 +303,24 @@ with st.sidebar:
         "S&P 500 (large-cap)": "sp500",
         "S&P 400 (mid-cap)": "sp400",
         "S&P 600 (small-cap)": "sp600",
-        "All combined (500+400+600)": "all",
         "My Watchlist (global ADRs)": "watchlist",
+        "All combined (500+400+600+Watchlist)": "all",
+        "🎲 Random 100 (from All combined)": "random100",
     }
 
-    mode = st.radio("Ticker universe", ["Manual list", "Index universe"], index=0)
+    universe_label = st.selectbox("Which index?", list(UNIVERSE_LABELS.keys()))
+    universe_key = UNIVERSE_LABELS[universe_label]
 
-    if mode == "Manual list":
-        default_list = "AAPL, MSFT, NVDA, GOOGL, AMZN, META, AVGO, TSLA, JPM, XOM, SPY, XLK"
-        tickers_input = st.text_area("Tickers (comma-separated) — stocks and ETFs both OK",
-                                      value=default_list, height=100)
-        tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    if universe_key == "random100":
+        st.caption("Scans 100 randomly chosen tickers from the full combined universe "
+                   "(S&P 500 + 400 + 600 + Watchlist). A brand-new random set is drawn "
+                   "every time you click **Run scan** — never the same 100 twice in a row.")
+        tickers = None  # drawn fresh at scan time, not here — see "Main scan" below
     else:
-        universe_label = st.selectbox("Which index?", list(UNIVERSE_LABELS.keys()))
-        universe_key = UNIVERSE_LABELS[universe_label]
         universe_total = len(ms.get_universe_tickers(universe_key))
-        n = st.slider(f"How many tickers to scan (1–{universe_total})", 1, universe_total,
-                      min(50, universe_total))
+        count_steps = ms.build_count_steps(universe_total, step=50)
+        n = st.select_slider(f"How many tickers to scan (1–{universe_total})",
+                             options=count_steps, value=count_steps[0])
         st.caption(f"Scans the first {n} of {universe_total} tickers in {universe_label}.")
         if n > 150:
             st.info("Scanning more than ~150 tickers can take several minutes due to Yahoo Finance rate limits.")
@@ -330,11 +331,6 @@ with st.sidebar:
         help="Per Murphy's sector-rotation approach: focus only on stocks whose sector is in the "
              "top third of the relative-strength leaderboard above. ETFs are never filtered by this.",
     )
-
-    use_beta_filter = st.checkbox("Filter by minimum beta", value=True)
-    min_beta = st.slider("Minimum beta (vs. SPY)", 0.0, 3.0, 1.0, 0.1, disabled=not use_beta_filter,
-                         help="Beta is computed directly from each stock's own price history vs. SPY "
-                              "(1-year daily returns), not pulled from an external data field.")
 
     only_actionable = st.checkbox(
         "Only show actionable setups (Buy Zone / Watchlist)", value=True,
@@ -349,12 +345,28 @@ with st.sidebar:
              "20-day average. Off by default — turn on to focus specifically on volume-confirmed names.",
     )
 
-    top_n = st.slider("Number of results to show (per list)", 5, 50, 20)
+    top_n = st.select_slider("Number of results to show (per list)",
+                             options=list(range(5, 51, 5)), value=20)
     run_button = st.button("🔍 Run scan", type="primary", use_container_width=True)
 
     st.markdown("---")
-    st.caption("Scoring weights: Trend 25 · MA50 setup 10 · Bollinger 10 · Candlestick 10 · "
-               "Volume 10 · RSI 10 · MACD 10 · Sector strength 10 · Macro regime 5")
+    with st.expander("ℹ️ What drives each stock's score?"):
+        st.markdown(
+            "- **Trend (up to 25 pts)** — 52-week uptrend, price above 50/200-day MA, golden-cross structure\n"
+            "- **MA50 setup (up to 10 pts)** — price hugging the 50-day MA on elevated volume (pullback entry)\n"
+            "- **Bollinger Bands (up to 10 pts)** — squeeze (breakout brewing) or lower-band touch in an uptrend\n"
+            "- **Candlestick (10 pts)** — Hammer, Bullish Engulfing, Piercing Line, or Morning Star detected\n"
+            "- **Volume (up to 10 pts)** — today's volume ≥2x the 20-day average, especially closing near the day's high\n"
+            "- **RSI (up to 10 pts)** — healthy bullish momentum (50–70), not overbought\n"
+            "- **MACD (up to 10 pts)** — above its signal line, histogram expanding\n"
+            "- **Sector strength (up to 10 pts)** — sector's relative-strength rank vs. SPY (stocks only)\n"
+            "- **Macro regime (5 pts)** — sector favored under the current intermarket regime (stocks only)\n\n"
+            "ETFs are scored out of 85 (no sector/macro points) and rescaled to 100.\n\n"
+            "**Not part of the score, shown as extra info/filters instead:**\n"
+            "- **Beta** — computed from the stock's own 1-year returns vs. SPY (informational only, no filter)\n"
+            "- **Setup tier** — Buy Zone / Watchlist / No Signal, based on whether a concrete trigger exists\n"
+            "- **Volume spike flag** — ≥1.5x average volume today or yesterday"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -376,8 +388,12 @@ with tab_home:
     # Main scan
     # ---------------------------------------------------------------------------
     if run_button:
+        if universe_key == "random100":
+            tickers = ms.get_random_tickers(100, universe="all")
+            st.caption(f"🎲 This run's random 100: {', '.join(tickers[:12])}, ...")
+
         if not tickers:
-            st.warning("No tickers entered.")
+            st.warning("No tickers to scan.")
             st.stop()
 
         regime = cached_regime()
@@ -385,12 +401,11 @@ with tab_home:
         strong_etfs_scan = ms.strong_sector_etfs(sector_leaderboard_scan) if sector_leaderboard_scan else set()
         spy_df_scan = cached_history("SPY")
         spy_close_scan = spy_df_scan["Close"] if spy_df_scan is not None else None
-        effective_min_beta = min_beta if use_beta_filter else None
 
         st.markdown(f'<div class="section-title">📋 Scan Results ({len(tickers)} tickers)</div>', unsafe_allow_html=True)
         progress = st.progress(0.0, text="Starting scan...")
         stock_results, etf_results = [], []
-        skipped_weak = skipped_beta = skipped_no_signal = skipped_no_vol_spike = 0
+        skipped_weak = skipped_no_signal = skipped_no_vol_spike = 0
         for i, ticker in enumerate(tickers, start=1):
             progress.progress(i / len(tickers), text=f"Scanning {ticker} ({i}/{len(tickers)})")
             try:
@@ -406,9 +421,6 @@ with tab_home:
                 res = ms.score_stock(ticker, df, sector, sector_leaderboard_scan, regime,
                                       is_etf=etf_flag, spy_close=spy_close_scan)
                 if not etf_flag:
-                    if effective_min_beta is not None and res["Beta"] is not None and res["Beta"] < effective_min_beta:
-                        skipped_beta += 1
-                        continue
                     if only_actionable and res["Setup"] == "No Signal":
                         skipped_no_signal += 1
                         continue
@@ -423,8 +435,6 @@ with tab_home:
         filter_notes = []
         if only_strong and skipped_weak:
             filter_notes.append(f"{skipped_weak} outside the currently-strong sectors")
-        if effective_min_beta is not None and skipped_beta:
-            filter_notes.append(f"{skipped_beta} with beta below {effective_min_beta}")
         if only_actionable and skipped_no_signal:
             filter_notes.append(f"{skipped_no_signal} with no actionable setup")
         if require_volume_spike and skipped_no_vol_spike:
