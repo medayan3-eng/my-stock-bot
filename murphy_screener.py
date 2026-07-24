@@ -123,12 +123,29 @@ def fetch_history(ticker, period_days=LOOKBACK_DAYS):
     return df
 
 
+def fetch_recent_quote(ticker, period_days=40):
+    """Lightweight fetch for just the latest price + day-over-day change.
+    Unlike fetch_history (which requires 210+ rows for 50/200-day MA and
+    52-week calculations), this only needs 2 rows — used for quick live
+    quotes like the market snapshot, where requesting a short window but
+    then rejecting it for being 'too short' would always return nothing."""
+    end = dt.date.today()
+    start = end - dt.timedelta(days=int(period_days * 1.6))
+    df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
+    if df is None or df.empty or len(df) < 2:
+        return None
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.rename(columns=str.title)
+    return df
+
+
 def get_market_snapshot():
     """Fetch live price + today's % change for FX/commodities/bond proxy
     tickers, for display on the dashboard home screen."""
     snapshot = {}
     for label, ticker in MARKET_SNAPSHOT_TICKERS.items():
-        df = fetch_history(ticker, period_days=30)
+        df = fetch_recent_quote(ticker)
         if df is None or len(df) < 2:
             snapshot[label] = {"ticker": ticker, "price": None, "day_change_pct": None}
             continue
@@ -333,30 +350,40 @@ def detect_bullish_candle(df):
 # INTERMARKET REGIME (Murphy's Intermarket Analysis)
 # ---------------------------------------------------------------------------
 
-def trend_direction(close, window=60):
-    """Simple slope-based trend: is the N-day SMA rising or falling?"""
+def trend_direction(close, window=60, compare_bars=20, threshold=0.005):
+    """Slope-based trend: is the N-day SMA rising or falling, comparing its
+    current value to `compare_bars` trading days ago? Returns (direction,
+    pct_change) where pct_change is the % move of the MA over that window —
+    shown alongside the label so 'Flat' is legible rather than a mystery
+    (e.g. a genuinely quiet market can show +/-0.2% and correctly read Flat)."""
     ma = sma(close, window)
-    if len(ma.dropna()) < 10:
-        return "flat"
-    recent = ma.dropna().iloc[-1]
-    prior = ma.dropna().iloc[-10]
-    if recent > prior * 1.01:
-        return "up"
-    elif recent < prior * 0.99:
-        return "down"
-    return "flat"
+    valid = ma.dropna()
+    if len(valid) < compare_bars + 1:
+        return "flat", 0.0
+    recent = valid.iloc[-1]
+    prior = valid.iloc[-(compare_bars + 1)]
+    pct_change = (recent / prior - 1) * 100
+    if pct_change > threshold * 100:
+        return "up", pct_change
+    elif pct_change < -threshold * 100:
+        return "down", pct_change
+    return "flat", pct_change
 
 
 def get_intermarket_regime():
     """Classify the macro regime using bonds/stocks/commodities/dollar trends,
     per Murphy's four-market model + Pring's six-stage business cycle map."""
     trends = {}
+    trends_pct = {}
     for name, ticker in INTERMARKET_TICKERS.items():
         df = fetch_history(ticker, period_days=250)
         if df is None:
             trends[name] = "unknown"
+            trends_pct[name] = None
         else:
-            trends[name] = trend_direction(df["Close"])
+            direction, pct_change = trend_direction(df["Close"])
+            trends[name] = direction
+            trends_pct[name] = round(pct_change, 2)
 
     bonds, stocks, commodities, dollar = (trends.get(k, "unknown") for k in
                                            ["Bonds", "Stocks", "Commodities", "Dollar"])
@@ -380,7 +407,7 @@ def get_intermarket_regime():
         regime = f"Mixed / no clear signal (stocks={stocks}, bonds={bonds}, commodities={commodities}, dollar={dollar})"
         favored = []
 
-    return {"trends": trends, "description": regime, "favored_sectors": favored}
+    return {"trends": trends, "trends_pct": trends_pct, "description": regime, "favored_sectors": favored}
 
 
 # ---------------------------------------------------------------------------
