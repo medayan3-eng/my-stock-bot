@@ -9,6 +9,7 @@ imports) in the SAME folder/repo.
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 import murphy_screener as ms
 
@@ -214,21 +215,23 @@ with tab_home:
     if sector_leaderboard:
         lb_rows = []
         for etf, info in sorted(sector_leaderboard.items(), key=lambda kv: kv[1]["rank"]):
+            price = info.get("price")
+            day_change = info.get("day_change_pct")
             lb_rows.append({
                 "Rank": info["rank"], "Sector": info["sector"], "ETF": etf,
-                "Price": info.get("price"),
-                "Today %": info.get("day_change_pct"),
-                "1w %": round(info["1w"], 2) if info["1w"] == info["1w"] else None,
-                "1m %": round(info["1m"], 2) if info["1m"] == info["1m"] else None,
-                "3m %": round(info["3m"], 2) if info["3m"] == info["3m"] else None,
-                "12m %": round(info["12m"], 2) if info["12m"] == info["12m"] else None,
+                "Price": float(price) if price is not None else np.nan,
+                "Today %": float(day_change) if day_change is not None else np.nan,
+                "1w %": round(info["1w"], 2) if info["1w"] == info["1w"] else np.nan,
+                "1m %": round(info["1m"], 2) if info["1m"] == info["1m"] else np.nan,
+                "3m %": round(info["3m"], 2) if info["3m"] == info["3m"] else np.nan,
+                "12m %": round(info["12m"], 2) if info["12m"] == info["12m"] else np.nan,
             })
         lb_df = pd.DataFrame(lb_rows)
         st.dataframe(
             lb_df.style
             .background_gradient(subset=["1m %", "3m %"], cmap="RdYlGn")
             .format({"Price": "{:.2f}", "Today %": "{:+.2f}%", "1w %": "{:.2f}", "1m %": "{:.2f}",
-                     "3m %": "{:.2f}", "12m %": "{:.2f}"}),
+                     "3m %": "{:.2f}", "12m %": "{:.2f}"}, na_rep="n/a"),
             use_container_width=True, hide_index=True,
         )
 
