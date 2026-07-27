@@ -146,10 +146,10 @@ def get_market_snapshot():
     snapshot = {}
     for label, ticker in MARKET_SNAPSHOT_TICKERS.items():
         df = fetch_recent_quote(ticker)
-        if df is None or len(df) < 2:
+        close = df["Close"].dropna() if df is not None else None
+        if close is None or len(close) < 2:
             snapshot[label] = {"ticker": ticker, "price": None, "day_change_pct": None}
             continue
-        close = df["Close"]
         price = float(close.iloc[-1])
         day_change_pct = float((close.iloc[-1] / close.iloc[-2] - 1) * 100)
         snapshot[label] = {"ticker": ticker, "price": price, "day_change_pct": day_change_pct}
@@ -448,7 +448,7 @@ def get_sector_leaderboard():
     spy = fetch_history(BENCHMARK, period_days=280)
     if spy is None:
         return {}
-    spy_close = spy["Close"]
+    spy_close = spy["Close"].dropna()
 
     results = {}
     seen_etfs = set()
@@ -461,7 +461,9 @@ def get_sector_leaderboard():
         df = fetch_history(etf, period_days=280)
         if df is None:
             continue
-        close = df["Close"]
+        close = df["Close"].dropna()
+        if len(close) < 2:
+            continue
 
         def rel_perf(n):
             if len(close) <= n or len(spy_close) <= n:
@@ -471,7 +473,7 @@ def get_sector_leaderboard():
             return (stock_ret - spy_ret) * 100  # percentage points vs SPY
 
         last_price = float(close.iloc[-1])
-        day_change_pct = float((close.iloc[-1] / close.iloc[-2] - 1) * 100) if len(close) >= 2 else np.nan
+        day_change_pct = float((close.iloc[-1] / close.iloc[-2] - 1) * 100)
 
         results[etf] = {
             "1w": rel_perf(5),
