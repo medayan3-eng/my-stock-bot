@@ -4,11 +4,29 @@ A **screener** (not an auto-trader). It scans a universe of stocks and/or ETFs, 
 0-100 using John Murphy's technical/intermarket principles plus candlestick confirmation, and
 explains in plain English why it scored that way. You decide what to trade.
 
+## The 5-Step Murphy Playbook (top-down methodology)
+The screener follows an explicit top-down morning routine, matching Murphy's Intermarket Analysis
+for macro/sector calls, Nison's candlesticks for entry timing, and Douglas/Schwager-style risk
+discipline for the final gate:
+
+1. **Macro/Intermarket** — Risk-On or Risk-Off, from the bonds/stocks/commodities/dollar regime
+2. **Sector Rotation** — is the stock's sector in the top third of the relative-strength leaderboard
+3. **Trend & Support** — confirmed uptrend (above 50/200-day MA) *and* currently at a support/pullback zone
+4. **Candlestick Timing** — Hammer, Bullish Engulfing, Piercing Line, or Morning Star detected today
+5. **Risk Management** — reward:risk ≥ 2:1 with a defined stop-loss
+
+Every stock gets a ✅/❌ breakdown across all 5 steps (shown in its card, and printed in the CLI),
+plus a pass-count like "3/5". Turn on **"🏆 Only show full 5/5 matches"** in the sidebar (or
+`--full-checklist-only` in the CLI) for the tightest possible filter — a narrow, high-conviction
+watchlist where every single step lines up, matching the "3-5 quality stocks" intent of the
+methodology. This is off by default since it can be very restrictive some days (or return nothing).
+
 ## Live home screen
 As soon as the app loads (before you click "Run scan"), you'll see:
-- The current **intermarket regime** (bonds/stocks/commodities/dollar trend directions).
-- The **sector leaderboard vs. SPY**, now including each sector ETF's **live price** and **today's %
-  change**, plus 1w/1m/3m/12m relative strength. This refreshes every 5 minutes.
+- The current **intermarket regime** (bonds/stocks/commodities/dollar trend directions) — this is
+  Step 1 of the playbook above.
+- The **sector leaderboard vs. SPY** (Step 2), now including each sector ETF's **live price** and
+  **today's % change**, plus 1w/1m/3m/12m relative strength. This refreshes every 5 minutes.
 - **Sectors showing strength** / **Sectors showing weakness** — the top and bottom third of the
   leaderboard.
 
