@@ -13,6 +13,24 @@ import numpy as np
 
 import murphy_screener as ms
 
+
+def fmt_or_na(x, spec="{:.2f}"):
+    """Format a number for display, or 'n/a' if it's missing (None or NaN).
+    Used instead of relying on pandas Styler's na_rep, which behaved
+    inconsistently across pandas/Streamlit versions and let raw 'None'
+    leak into the UI instead of a clean placeholder."""
+    if x is None:
+        return "n/a"
+    try:
+        if isinstance(x, float) and np.isnan(x):
+            return "n/a"
+    except TypeError:
+        pass
+    try:
+        return spec.format(x)
+    except (ValueError, TypeError):
+        return "n/a"
+
 st.set_page_config(page_title="Murphy Screener", page_icon="📈", layout="wide")
 
 # ---------------------------------------------------------------------------
@@ -215,25 +233,17 @@ with tab_home:
     if sector_leaderboard:
         lb_rows = []
         for etf, info in sorted(sector_leaderboard.items(), key=lambda kv: kv[1]["rank"]):
-            price = info.get("price")
-            day_change = info.get("day_change_pct")
             lb_rows.append({
                 "Rank": info["rank"], "Sector": info["sector"], "ETF": etf,
-                "Price": float(price) if price is not None else np.nan,
-                "Today %": float(day_change) if day_change is not None else np.nan,
-                "1w %": round(info["1w"], 2) if info["1w"] == info["1w"] else np.nan,
-                "1m %": round(info["1m"], 2) if info["1m"] == info["1m"] else np.nan,
-                "3m %": round(info["3m"], 2) if info["3m"] == info["3m"] else np.nan,
-                "12m %": round(info["12m"], 2) if info["12m"] == info["12m"] else np.nan,
+                "Price": fmt_or_na(info.get("price")),
+                "Today %": fmt_or_na(info.get("day_change_pct"), "{:+.2f}%"),
+                "1w %": fmt_or_na(info.get("1w")),
+                "1m %": fmt_or_na(info.get("1m")),
+                "3m %": fmt_or_na(info.get("3m")),
+                "12m %": fmt_or_na(info.get("12m")),
             })
         lb_df = pd.DataFrame(lb_rows)
-        st.dataframe(
-            lb_df.style
-            .background_gradient(subset=["1m %", "3m %"], cmap="RdYlGn")
-            .format({"Price": "{:.2f}", "Today %": "{:+.2f}%", "1w %": "{:.2f}", "1m %": "{:.2f}",
-                     "3m %": "{:.2f}", "12m %": "{:.2f}"}, na_rep="n/a"),
-            use_container_width=True, hide_index=True,
-        )
+        st.dataframe(lb_df, use_container_width=True, hide_index=True)
 
         strong, weak = ms.summarize_sector_strength(sector_leaderboard)
         strong_etfs = ms.strong_sector_etfs(sector_leaderboard)
@@ -348,11 +358,35 @@ with st.sidebar:
              "20-day average. Off by default — turn on to focus specifically on volume-confirmed names.",
     )
 
+    require_full_checklist = st.checkbox(
+        "🏆 Only show full 5/5 Murphy Playbook matches", value=False,
+        help="The tightest filter: only stocks passing ALL 5 steps of the top-down playbook — "
+             "macro Risk-On, leading sector, confirmed uptrend at support, a bullish candlestick "
+             "today, and a 2:1+ reward-to-risk setup. Matches the document's '3-5 quality stocks' "
+             "watchlist intent. Off by default since it can be very restrictive.",
+    )
+
     top_n = st.select_slider("Number of results to show (per list)",
                              options=list(range(5, 51, 5)), value=20)
     run_button = st.button("🔍 Run scan", type="primary", use_container_width=True)
 
     st.markdown("---")
+    with st.expander("🧭 The 5-Step Murphy Playbook"):
+        st.markdown(
+            "This screener follows a top-down morning routine, in this order:\n\n"
+            "1. **Macro/Intermarket** — Risk-On or Risk-Off? (bonds/stocks/commodities/dollar trends, above)\n"
+            "2. **Sector Rotation** — which 2-3 sectors show real relative strength right now? (leaderboard, above)\n"
+            "3. **Trend & Support** — within those sectors, is the stock in a confirmed uptrend *and* pulling back "
+            "to a support zone (50-day MA, trendline, or prior resistance-turned-support)?\n"
+            "4. **Candlestick Timing** — is there a bullish reversal pattern (Hammer, Bullish Engulfing, Piercing "
+            "Line, Morning Star) right at that support, ideally with volume/RSI confirmation?\n"
+            "5. **Risk Management** — is the reward:risk at least 2:1, with a clear stop-loss and (on your end) "
+            "position sizing capped at 1-2% of the account per trade?\n\n"
+            "Every stock's card shows a **5-step checklist** (✅/❌ per step) so you can see exactly where it "
+            "stands in this exact process — turn on **'Only show full 5/5 matches'** above for the tightest, "
+            "highest-conviction list."
+        )
+
     with st.expander("ℹ️ What drives each stock's score?"):
         st.markdown(
             "- **Trend (up to 25 pts)** — 52-week uptrend, price above 50/200-day MA, golden-cross structure\n"
@@ -368,7 +402,8 @@ with st.sidebar:
             "**Not part of the score, shown as extra info/filters instead:**\n"
             "- **Beta** — computed from the stock's own 1-year returns vs. SPY (informational only, no filter)\n"
             "- **Setup tier** — Buy Zone / Watchlist / No Signal, based on whether a concrete trigger exists\n"
-            "- **Volume spike flag** — ≥1.5x average volume today or yesterday"
+            "- **Volume spike flag** — ≥1.5x average volume today or yesterday\n"
+            "- **Murphy Playbook checklist** — the 5-step pass/fail breakdown described above"
         )
 
 
@@ -408,7 +443,7 @@ with tab_home:
         st.markdown(f'<div class="section-title">📋 Scan Results ({len(tickers)} tickers)</div>', unsafe_allow_html=True)
         progress = st.progress(0.0, text="Starting scan...")
         stock_results, etf_results = [], []
-        skipped_weak = skipped_no_signal = skipped_no_vol_spike = 0
+        skipped_weak = skipped_no_signal = skipped_no_vol_spike = skipped_checklist = 0
         for i, ticker in enumerate(tickers, start=1):
             progress.progress(i / len(tickers), text=f"Scanning {ticker} ({i}/{len(tickers)})")
             try:
@@ -430,6 +465,9 @@ with tab_home:
                     if require_volume_spike and not res["VolumeSpike"]:
                         skipped_no_vol_spike += 1
                         continue
+                    if require_full_checklist and res["ChecklistPassCount"] < 5:
+                        skipped_checklist += 1
+                        continue
                 (etf_results if etf_flag else stock_results).append(res)
             except Exception as e:
                 st.warning(f"Skipped {ticker}: {e}")
@@ -442,6 +480,8 @@ with tab_home:
             filter_notes.append(f"{skipped_no_signal} with no actionable setup")
         if require_volume_spike and skipped_no_vol_spike:
             filter_notes.append(f"{skipped_no_vol_spike} without a {ms.RECENT_VOLUME_SPIKE_MULT}x+ volume spike")
+        if require_full_checklist and skipped_checklist:
+            filter_notes.append(f"{skipped_checklist} that didn't pass all 5 Murphy Playbook steps")
         if filter_notes:
             st.caption("ℹ️ Skipped " + "; ".join(filter_notes) + " (adjust the sidebar filters to include them).")
 
@@ -449,9 +489,8 @@ with tab_home:
             st.error("No results returned. Check your tickers/filters and try again.")
             st.stop()
 
-        display_cols = ["Ticker", "Score", "Setup", "Sector", "Beta", "VolumeSpikeRatio", "VolumeSpikeDay",
-                         "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
-        money_cols = ["Price", "StopLoss", "Target", "R:R"]
+        display_cols = ["Ticker", "Score", "ChecklistPassCount", "Setup", "Sector", "Beta", "VolumeSpikeRatio",
+                         "VolumeSpikeDay", "Price", "StopLoss", "Target", "R:R", "RSI", "SectorRank"]
         SETUP_SORT_ORDER = {"Buy Zone": 0, "Watchlist": 1, "No Signal": 2}
 
         def setup_badge(setup):
@@ -464,39 +503,54 @@ with tab_home:
             df_out = pd.DataFrame(results)
             if sort_by_setup:
                 df_out = df_out.assign(_s=df_out["Setup"].map(SETUP_SORT_ORDER).fillna(9)).sort_values(
-                    ["_s", "Score"], ascending=[True, False]).drop(columns="_s")
+                    ["_s", "ChecklistPassCount", "Score"], ascending=[True, False, False]).drop(columns="_s")
             else:
                 df_out = df_out.sort_values("Score", ascending=False)
             df_out = df_out.head(top_n)
 
             st.markdown(f'<div class="section-title">{icon} {title} ({len(results)} found)</div>', unsafe_allow_html=True)
-            format_map = {c: "{:.2f}" for c in money_cols}
-            format_map["Beta"] = "{:.2f}"
-            format_map["VolumeSpikeRatio"] = "{:.2f}"
-            st.dataframe(
-                df_out[display_cols]
-                .style.background_gradient(subset=["Score"], cmap="RdYlGn", vmin=0, vmax=100)
-                .format(format_map, na_rep="n/a"),
-                use_container_width=True, hide_index=True,
-            )
+            display_df = df_out[display_cols].copy()
+            for col in ["Price", "StopLoss", "Target", "R:R", "Beta", "VolumeSpikeRatio"]:
+                display_df[col] = df_out[col].apply(lambda v: fmt_or_na(v))
+            try:
+                st.dataframe(
+                    display_df.style.background_gradient(subset=["Score"], cmap="RdYlGn", vmin=0, vmax=100),
+                    use_container_width=True, hide_index=True,
+                )
+            except Exception:
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
 
             st.markdown(f'<div class="section-title">🔎 {title} — Per-Ticker Breakdown</div>', unsafe_allow_html=True)
             for _, row in df_out.iterrows():
+                checklist_n = row.get("ChecklistPassCount")
                 header = f"{row['Ticker']} — {row['Sector']}"
+                if checklist_n is not None:
+                    header += f"  ({checklist_n}/5 Murphy steps)"
                 with st.expander(header):
-                    beta_txt = f"Beta {row['Beta']:.2f}" if row["Beta"] is not None else "Beta n/a"
+                    beta_txt = f"Beta {fmt_or_na(row['Beta'])}"
                     badges = (f'{score_badge(row["Score"])} &nbsp; {setup_badge(row["Setup"])} &nbsp; '
                               f'<span class="sector-chip">{row["Sector"]}</span> &nbsp; '
                               f'<span class="sector-chip">{beta_txt}</span>')
                     if row.get("VolumeSpike"):
-                        badges += (f' &nbsp; <span class="sector-chip">🔊 {row["VolumeSpikeRatio"]:.1f}x '
+                        badges += (f' &nbsp; <span class="sector-chip">🔊 {fmt_or_na(row["VolumeSpikeRatio"], "{:.1f}")}x '
                                    f'volume ({row["VolumeSpikeDay"]})</span>')
+                    if checklist_n is not None:
+                        cl_cls = "badge-high" if checklist_n == 5 else ("badge-mid" if checklist_n >= 3 else "badge-low")
+                        badges += f' &nbsp; <span class="badge {cl_cls}">{checklist_n}/5 steps</span>'
                     st.markdown(badges, unsafe_allow_html=True)
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Price", f"{row['Price']:.2f}")
-                    c2.metric("Stop-loss", f"{row['StopLoss']:.2f}")
-                    c3.metric("Target", f"{row['Target']:.2f}")
-                    c4.metric("R:R", f"{row['R:R']:.2f}" if row["R:R"] is not None else "n/a")
+                    c1.metric("Price", fmt_or_na(row['Price']))
+                    c2.metric("Stop-loss", fmt_or_na(row['StopLoss']))
+                    c3.metric("Target", fmt_or_na(row['Target']))
+                    c4.metric("R:R", fmt_or_na(row['R:R']))
+                    if row.get("Checklist"):
+                        st.markdown("**📋 Murphy Playbook checklist (5 steps, top-down):**")
+                        for c in row["Checklist"]:
+                            icon = "✅" if c["passed"] else "❌"
+                            st.markdown(
+                                f'<div class="reason-item">{icon} <b>Step {c["step"]} — {c["label"]}:</b> {c["detail"]}</div>',
+                                unsafe_allow_html=True,
+                            )
                     st.markdown("**Why it scored this way:**")
                     for r in row["Reasons"]:
                         st.markdown(f'<div class="reason-item">• {r}</div>', unsafe_allow_html=True)
@@ -505,7 +559,12 @@ with tab_home:
                         stock_df = cached_history(row["Ticker"])
                         render_relative_strength_chart(row["Ticker"], stock_df)
 
-            csv = df_out.assign(Reasons=df_out["Reasons"].apply(lambda r: " | ".join(r))).to_csv(index=False).encode("utf-8-sig")
+            csv = df_out.assign(
+                Reasons=df_out["Reasons"].apply(lambda r: " | ".join(r)),
+                Checklist=df_out["Checklist"].apply(
+                    lambda cl: " | ".join(f"{'PASS' if c['passed'] else 'FAIL'} Step{c['step']}:{c['label']}" for c in cl)
+                ),
+            ).to_csv(index=False).encode("utf-8-sig")
             st.download_button(f"⬇️ Download {title} CSV", csv, csv_name, "text/csv",
                                 use_container_width=True, key=csv_name)
 
